@@ -1,0 +1,4 @@
+telegram.json
+.env
+data/
+*.failed.*

@@ -1,0 +1,53 @@
+services:
+  ftp:
+    image: stilliard/pure-ftpd:latest
+    container_name: camera-ftp
+    environment:
+      PUBLICHOST: ${PUBLICHOST:-127.0.0.1}
+      FTP_USER_NAME: ${FTP_USER:-cameras}
+      FTP_USER_PASS: ${FTP_PASS:-cameras}
+      FTP_USER_HOME: /data/incoming
+      FTP_PASSIVE_PORTS: "30000:30009"
+    ports:
+      - "21:21"
+      - "30000-30009:30000-30009"
+    volumes:
+      # Option A (named volume — Docker manages storage):
+      - camera_data:/data
+      # Option B (bind mount — explicit host path, easier to access files directly):
+      # Uncomment the line below and comment out Option A:
+      # - ${DATA_DIR:-./data}:/data
+    networks:
+      - camera_net
+    restart: unless-stopped
+
+  sorter:
+    build: .
+    container_name: camera-sorter
+    environment:
+      INCOMING: /data/incoming
+      SORTED: /data/sorted
+      QUARANTINE: /data/quarantine
+      STABLE_WAIT: ${STABLE_WAIT:-60}
+      NOTIFY_INTERVAL: ${NOTIFY_INTERVAL:-300}
+      TG_CONFIG: /etc/telegram.json
+    volumes:
+      # Must match whichever option you chose above for `ftp`:
+      - camera_data:/data
+      # - ${DATA_DIR:-./data}:/data
+      #
+      # Optional: mount telegram config if you have it.
+      # The sorter skips notifications gracefully if this file is absent.
+      # - ./telegram.json:/etc/telegram.json:ro
+    networks:
+      - camera_net
+    depends_on:
+      - ftp
+    restart: unless-stopped
+
+networks:
+  camera_net:
+    driver: bridge
+
+volumes:
+  camera_data:
