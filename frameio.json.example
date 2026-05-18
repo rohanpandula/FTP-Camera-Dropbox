@@ -1,0 +1,6 @@
+{
+  "frameio_webhook_secret": "OPTIONAL_FROM_FRAMEIO_WEBHOOK_UI",
+  "adobe_client_id": "OPTIONAL_FROM_ADOBE_DEV_CONSOLE",
+  "adobe_client_secret": "OPTIONAL_FROM_ADOBE_DEV_CONSOLE",
+  "adobe_scopes": "openid,AdobeID,additional_info.roles"
+}

@@ -45,6 +45,48 @@ services:
       - ftp
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Optional: Frame.io Camera-to-Cloud mirror
+  # ---------------------------------------------------------------------------
+  # Receives Frame.io V4 webhooks, downloads the asset to /data/incoming, then
+  # (optionally) deletes it from Frame.io to keep the free-tier quota clear.
+  # The sorter picks it up exactly like an FTP upload — same incoming path.
+  #
+  # Opt-in only: this service is in the `frameio` profile, so plain
+  # `docker compose up -d` leaves it off. To include it:
+  #
+  #     docker compose --profile frameio up -d
+  #
+  # You'll need a public HTTPS endpoint pointing at this container's :8000
+  # (Cloudflare Tunnel, ngrok, Caddy + Let's Encrypt — whatever fits).
+  # See frameio-mirror/README.md for the full setup.
+  # ---------------------------------------------------------------------------
+  frameio-mirror:
+    build: ./frameio-mirror
+    container_name: frameio-mirror
+    profiles: ["frameio"]
+    environment:
+      INCOMING_DIR: /data/incoming
+      # All four below are optional. Without them the service still receives
+      # webhooks and tries the pre-signed URL path from the payload.
+      FRAMEIO_WEBHOOK_SECRET: ${FRAMEIO_WEBHOOK_SECRET:-}
+      ADOBE_CLIENT_ID: ${ADOBE_CLIENT_ID:-}
+      ADOBE_CLIENT_SECRET: ${ADOBE_CLIENT_SECRET:-}
+      ADOBE_SCOPES: ${ADOBE_SCOPES:-openid,AdobeID,additional_info.roles}
+    volumes:
+      # Same volume as ftp+sorter — downloads land where the sorter is watching:
+      - camera_data:/data
+      # - ${DATA_DIR:-./data}:/data
+      #
+      # Optional: mount a frameio.json instead of using env vars (same pattern
+      # as telegram.json). Env vars take precedence if both are set.
+      # - ./frameio.json:/etc/frameio.json:ro
+    ports:
+      - "8000:8000"
+    networks:
+      - camera_net
+    restart: unless-stopped
+
 networks:
   camera_net:
     driver: bridge

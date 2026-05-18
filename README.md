@@ -20,6 +20,7 @@ This gives you a Lightroom-style auto-import folder structure, running on your o
 - Reconcile scan every 5 minutes catches anything inotify missed
 - Stuck-file detection flags uploads that have been sitting in incoming for too long
 - Entirely offline-capable: sorter needs no inbound network, only outbound for Telegram
+- **Optional Frame.io C2C mirror** — receives webhooks from Frame.io and drops the asset into the same `incoming/` directory the sorter watches, so cloud-uploaded files merge seamlessly into your local library. See [frameio-mirror/README.md](frameio-mirror/README.md).
 
 ## Quickstart
 
@@ -107,6 +108,21 @@ Notifications look like:
 ```
 
 If the config file is absent, the sorter starts normally and just skips notifications. No crashes, no retries.
+
+## Frame.io Camera-to-Cloud mirror (optional)
+
+If you shoot with a body or phone paired to [Frame.io Camera-to-Cloud](https://frame.io/c2c), there's an opt-in second intake path that receives Frame.io webhooks and drops new assets into the same `incoming/` directory. The sorter treats them identically to FTP uploads.
+
+Off by default. To bring it up:
+
+```bash
+docker compose --profile frameio up -d --build
+curl http://localhost:8000/health
+```
+
+You'll need a public HTTPS endpoint pointing at `:8000` so Frame.io can POST webhooks. Cloudflare Tunnel, ngrok, or any reverse-proxy + Let's Encrypt all work — the mirror itself doesn't care.
+
+Full setup (Frame.io webhook config, optional Adobe Developer Console credentials for auto-delete, configuration env vars) is in [frameio-mirror/README.md](frameio-mirror/README.md).
 
 ## Hard-Earned Gotchas
 
