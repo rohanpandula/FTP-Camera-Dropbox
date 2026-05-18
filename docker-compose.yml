@@ -81,6 +81,16 @@ services:
       # Optional: mount a frameio.json instead of using env vars (same pattern
       # as telegram.json). Env vars take precedence if both are set.
       # - ./frameio.json:/etc/frameio.json:ro
+      #
+      # Optional: mount the same telegram.json the sorter uses → mirror sends
+      # throttled ⚠️ Telegram alerts on failure (HTTP errors, size mismatch,
+      # missing Adobe creds). Plus a 🟢 startup ping each time it boots.
+      # - ./telegram.json:/etc/telegram.json:ro
+      #
+      # Optional: writable file for OAuth Web App refresh-token persistence.
+      # Create as `echo "{}" > oauth-state.json && chmod 600 oauth-state.json`
+      # before first start, then mount it RW (not :ro).
+      # - ./oauth-state.json:/etc/frameio-oauth-state.json
     ports:
       - "8000:8000"
     networks:

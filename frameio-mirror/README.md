@@ -94,6 +94,23 @@ docker logs frameio-mirror 2>&1 | grep -i "adobe ims"
 
 Env vars take precedence over `frameio.json`. Mount the JSON for the secrets-on-disk pattern; use env vars in dev or for one-offs.
 
+## Telegram alerts on failure (optional)
+
+If you mount the same `telegram.json` the sorter uses at `/etc/telegram.json`, the mirror sends throttled ⚠️ alerts on:
+
+| Failure | Throttle |
+|---|---|
+| `file.ready` arrived but Adobe credentials not configured | 1 / hour |
+| Size mismatch (downloaded bytes ≠ metadata size) | 1 / 15 min |
+| Frame.io API HTTP error (per status code) | 1 / 15 min |
+| Unexpected exception during asset processing | 1 / 15 min |
+
+Throttling is per-kind in memory, so a single broken state doesn't fan out into a spam loop. Resets on container restart (a fresh start gets one ping per error type even if you just saw one).
+
+You also get a one-time 🟢 startup ping each time the container boots — confirms the credentials are reaching Telegram. If you don't see one, the mount isn't working.
+
+The success path is silent. The sorter handles the "files landed" notifications via its own 5-min batched queue.
+
 ## Behavior notes
 
 - **Size mismatch → no delete.** If the bytes downloaded don't match the size in the webhook payload, the file is kept in `incoming/` (sorter will quarantine it on size-floor failure) and the upstream asset is NOT deleted. You can re-trigger by replaying the webhook from Frame.io.

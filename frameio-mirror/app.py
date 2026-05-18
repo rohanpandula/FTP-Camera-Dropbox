@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -118,6 +119,69 @@ def _save_refresh_token(token: str) -> None:
     except Exception:
         pass  # bind-mounted file may not allow chmod
     log.info("Refresh token persisted to %s", path)
+
+
+# ---------------------------------------------------------------------------
+# Telegram alerts (optional — same telegram.json the sorter uses)
+# ---------------------------------------------------------------------------
+_TG_CONFIG_PATH = Path(os.environ.get("TG_CONFIG", "/etc/telegram.json"))
+_TG: dict | None = None
+_TG_THROTTLE: dict[str, float] = {}  # error-kind -> last-send monotonic ts
+_TG_THROTTLE_LOCK = asyncio.Lock()
+
+
+def _load_telegram() -> dict | None:
+    if not _TG_CONFIG_PATH.exists():
+        return None
+    try:
+        d = json.loads(_TG_CONFIG_PATH.read_text())
+        if d.get("bot_token") and d.get("chat_id"):
+            return {"bot_token": d["bot_token"], "chat_id": str(d["chat_id"])}
+    except Exception as exc:
+        log.warning("Failed to read telegram config %s: %s", _TG_CONFIG_PATH, exc)
+    return None
+
+
+_TG = _load_telegram()
+log.info(
+    "Telegram alerts: %s",
+    f"enabled (chat={_TG['chat_id'][:4]}***)" if _TG else f"disabled (no {_TG_CONFIG_PATH})",
+)
+
+
+async def _tg_send(text: str) -> bool:
+    """Direct send to Telegram (no throttle). Returns True on success."""
+    if not _TG:
+        return False
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{_TG['bot_token']}/sendMessage",
+                data={"chat_id": _TG["chat_id"], "text": text},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return True
+            log.warning("Telegram send failed: HTTP %d %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            log.warning("Telegram send exception: %s", exc)
+    return False
+
+
+async def notify_failure(kind: str, detail: str, throttle_minutes: int = 15) -> None:
+    """Fire a throttled Telegram alert. Same kind within window is suppressed."""
+    if not _TG:
+        return
+    async with _TG_THROTTLE_LOCK:
+        now = time.monotonic()
+        if now - _TG_THROTTLE.get(kind, 0) < throttle_minutes * 60:
+            return
+        _TG_THROTTLE[kind] = now
+    text = f"⚠️ frameio-mirror: {kind}\n{detail[:500]}"
+    if await _tg_send(text):
+        log.info("Telegram alert sent: kind=%s", kind)
+
+
 FRAMEIO_API = "https://api.frame.io/v4"
 _REFRESH_BEFORE_EXPIRY = 300  # seconds
 
@@ -186,7 +250,19 @@ async def get_token(client: httpx.AsyncClient) -> str:
 # FastAPI app
 # ---------------------------------------------------------------------------
 _START_TIME = time.monotonic()
-app = FastAPI(title="frameio-mirror", version="1.0.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # One-time startup ping so user knows alerts are working
+    if _TG:
+        await _tg_send(
+            "🟢 frameio-mirror online (alerts active — you'll see ⚠️ on real failures, throttled per kind)"
+        )
+    yield
+
+
+app = FastAPI(title="frameio-mirror", version="1.0.0", lifespan=lifespan)
 
 
 def _verify_signature(
@@ -383,6 +459,11 @@ async def webhook(
             "file.ready for %s but Adobe credentials not configured — cannot download",
             resource_id,
         )
+        await notify_failure(
+            "no_adobe_credentials",
+            f"file.ready arrived (asset {resource_id[:8]}…) but ADOBE_CLIENT_ID/SECRET not set — file stays in Frame.io.",
+            throttle_minutes=60,
+        )
         return {"status": "acknowledged_skipped", "reason": "no_adobe_credentials"}
 
     background_tasks.add_task(process_asset, account_id, resource_id)
@@ -478,6 +559,11 @@ async def process_asset(account_id: str, asset_id: str) -> None:
                     "Size mismatch for %s: expected=%d got=%d — NOT deleting upstream",
                     filename, expected_size, downloaded,
                 )
+                await notify_failure(
+                    "size_mismatch",
+                    f"{filename}: expected {expected_size:,} bytes, got {downloaded:,}. Upstream not deleted; partial in {tmp.name}.",
+                    throttle_minutes=15,
+                )
                 # keep the partial in tmp so we can inspect
                 return
             if expected_size:
@@ -504,9 +590,20 @@ async def process_asset(account_id: str, asset_id: str) -> None:
                 )
 
         except httpx.HTTPStatusError as exc:
+            sc = exc.response.status_code
             log.error(
                 "HTTP error processing asset %s: %s %s",
-                asset_id, exc.response.status_code, exc.response.text[:200],
+                asset_id, sc, exc.response.text[:200],
+            )
+            await notify_failure(
+                f"http_{sc}",
+                f"Asset {asset_id[:8]}…: HTTP {sc} from {exc.request.url}\n{exc.response.text[:300]}",
+                throttle_minutes=15,
             )
         except Exception as exc:
             log.error("Unexpected error processing asset %s: %s", asset_id, exc, exc_info=True)
+            await notify_failure(
+                "asset_exception",
+                f"Asset {asset_id[:8]}…: {type(exc).__name__}: {exc}",
+                throttle_minutes=15,
+            )
