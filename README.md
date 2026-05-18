@@ -20,7 +20,7 @@ This gives you a Lightroom-style auto-import folder structure, running on your o
 - Reconcile scan every 5 minutes catches anything inotify missed
 - Stuck-file detection flags uploads that have been sitting in incoming for too long
 - Entirely offline-capable: sorter needs no inbound network, only outbound for Telegram
-- **Optional Frame.io C2C mirror** — receives webhooks from Frame.io and drops the asset into the same `incoming/` directory the sorter watches, so cloud-uploaded files merge seamlessly into your local library. See [frameio-mirror/README.md](frameio-mirror/README.md).
+- **Optional Frame.io C2C mirror** — receives webhooks from Frame.io, downloads + size-verifies + deletes assets via the V4 API, and drops them into the same `incoming/` directory the sorter watches. Files from Wi-Fi FTP and Frame.io C2C merge seamlessly into one library. Optional throttled Telegram alerts on failure. Supports both Enterprise (S2S OAuth) and personal Adobe accounts (OAuth Web App + persisted refresh token). See [frameio-mirror/README.md](frameio-mirror/README.md).
 
 ## Quickstart
 
@@ -111,7 +111,9 @@ If the config file is absent, the sorter starts normally and just skips notifica
 
 ## Frame.io Camera-to-Cloud mirror (optional)
 
-If you shoot with a body or phone paired to [Frame.io Camera-to-Cloud](https://frame.io/c2c), there's an opt-in second intake path that receives Frame.io webhooks and drops new assets into the same `incoming/` directory. The sorter treats them identically to FTP uploads.
+If you shoot with a body or phone paired to [Frame.io Camera-to-Cloud](https://frame.io/c2c), there's an opt-in second intake path. The mirror receives Frame.io V4 webhooks, downloads the asset via the API, size-verifies it, and drops it into the same `incoming/` directory the sorter watches — so Wi-Fi FTP uploads and cloud C2C uploads land in the same date-sorted library.
+
+It also deletes the upstream asset from Frame.io after a verified download, so the **2 GB free-tier quota stays empty** indefinitely.
 
 Off by default. To bring it up:
 
@@ -120,9 +122,16 @@ docker compose --profile frameio up -d --build
 curl http://localhost:8000/health
 ```
 
-You'll need a public HTTPS endpoint pointing at `:8000` so Frame.io can POST webhooks. Cloudflare Tunnel, ngrok, or any reverse-proxy + Let's Encrypt all work — the mirror itself doesn't care.
+You'll need a public HTTPS endpoint pointing at `:8000` so Frame.io can POST webhooks (Cloudflare Tunnel, ngrok, or any reverse-proxy + Let's Encrypt all work — the mirror itself doesn't care).
 
-Full setup (Frame.io webhook config, optional Adobe Developer Console credentials for auto-delete, configuration env vars) is in [frameio-mirror/README.md](frameio-mirror/README.md).
+**Two auth modes:**
+
+- **OAuth Server-to-Server** — for Enterprise Adobe organizations. Headless, set-and-forget; add the credential in Dev Console, paste `client_id` + `client_secret`, done.
+- **OAuth Web App + refresh token** — for personal/individual Adobe accounts (S2S isn't offered to these). One-time browser dance via `/oauth/start`, then permanent. The refresh token is persisted to disk; the mirror auto-mints 1-hour access tokens via the refresh grant forever.
+
+**Failure alerts** (also optional): mount the same `telegram.json` the sorter uses at `/etc/telegram.json` and the mirror sends throttled ⚠️ pings on real failures — Frame.io API errors, size mismatches, missing Adobe credentials. Per-kind in-memory throttling means a stuck state can't spam. The success path stays silent; the sorter handles "files landed" via its own 5-min batched queue.
+
+Full setup (Frame.io webhook config, the click-by-click Adobe Dev Console walkthrough for both auth modes, configuration env vars, alert behavior, exact endpoints) is in [frameio-mirror/README.md](frameio-mirror/README.md).
 
 ## Hard-Earned Gotchas
 
@@ -139,6 +148,20 @@ These are the things that cost real time to figure out.
 **macvlan / br0 host-isolation is a red herring if you're on Unraid.** If you're running on Unraid and assigning each container a dedicated IP on br0, you'll notice the Unraid host itself can't ping or connect to its own containers (`Destination Host Unreachable`). This is a Linux kernel rule about macvlan interfaces — the host and its macvlan children can't communicate directly. It's not a bug in your FTP setup. Other devices on your LAN (including cameras) reach the containers just fine. We spent a while convinced the FTP server was broken when it was just the host's network view that was isolated.
 
 **Dedup is hash-on-collision, not hash-everything.** The naive approach hashes every incoming file against every existing file — expensive on a large library. The approach here: filename collision triggers a size check. If sizes differ, it's a different file, rename and keep. If sizes match, *then* xxhash both files. Exact duplicate → delete incoming. This means uploading a unique file (the common case) costs zero hashing. A retry upload of an already-sorted file costs one hash comparison (~50ms for a RAF). The library can grow without the dedup step getting slower.
+
+### Frame.io mirror gotchas
+
+**Frame.io V4 webhook payloads contain just `resource.id` — everything else requires an authenticated API call.** No filename, no size, no pre-signed URL. The "maybe we can skip Adobe Dev Console" idea sounds reasonable until you read [the docs](https://developer.adobe.com/frameio/api/current/guides/webhooks/) literally: *"We do not include any additional information beyond the resource ID."* Webhook arrives → call `GET /v4/accounts/{account_id}/files/{file_id}?include=media_links.original` → stream the URL it returns → `DELETE` the file. No shortcut exists.
+
+**Frame.io V4 webhook signatures sign `v0:<timestamp>:<body>`, not the body alone.** Stripe-style scheme. Two headers: `X-Frameio-Signature` (formatted as `v0=<hex>`) and `X-Frameio-Request-Timestamp` (Unix epoch). HMAC-SHA256 with the secret encoded as latin-1. The naive `HMAC(secret, body)` returns 403 forever. Verify timestamp drift to prevent replay attacks (5 min is sane).
+
+**Adobe Server-to-Server OAuth is Enterprise-only.** Personal Adobe accounts see only `OAuth Web App`, `Single Page App`, and `Native App` credential types in the Developer Console — no S2S option. For headless usage from a personal account, do the OAuth Web App flow once via a browser to capture a `refresh_token`, persist it, then mint access tokens via the refresh grant. Adobe IMS refresh tokens don't expire unless idle for months. The mirror has `/oauth/start` and `/oauth/callback` endpoints to do this dance with a single browser visit.
+
+**Frame.io V4 access tokens via Web App are 1-hour TTL** (vs S2S's 24 hours). The mirror caches access tokens in memory and silently refreshes when within 5 minutes of expiry. You won't notice unless you read the logs — but if you ever swap to a forked auth flow, build the refresh in or you'll see 401s right when you don't want them.
+
+**Docker single-file bind mounts can't be atomic-renamed.** If you mount a single file (not its parent directory) into a container, the kernel pins the destination inode. `os.replace(tmp, dest)` raises `EBUSY`. You can write to the file in-place, but you can't rename other files over it. The mirror does in-place writes on its `oauth-state.json` for this reason — losing atomicity is fine for tiny single-value writes; mount the parent directory if you really need atomic semantics.
+
+**Your "free" static IP isn't guaranteed free.** Picking a br0 macvlan IP by checking what's currently assigned to other containers is necessary but not sufficient. If the IP is inside your DHCP pool, the router can hand it out to an iPhone or Mac while your container is running. You get a silent split-brain: ICMP succeeds (the other device responds), TCP fails (no service on its port). The fix is to either reserve the IP on the DHCP server or pick one outside the dynamic range.
 
 ## How It Works
 
