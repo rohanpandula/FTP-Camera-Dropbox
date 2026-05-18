@@ -70,6 +70,13 @@ def _load_config() -> dict:
         "refresh_token_file": os.environ.get(
             "REFRESH_TOKEN_FILE", "/etc/frameio-oauth-state.json"
         ),
+        # Reconciliation: env vars override; otherwise auto-discovered from
+        # first file.ready webhook and persisted to the state file.
+        "c2c_folder_id": _get("FRAMEIO_C2C_FOLDER_ID", "c2c_folder_id"),
+        "c2c_account_id": _get("FRAMEIO_C2C_ACCOUNT_ID", "c2c_account_id"),
+        "reconcile_interval_seconds": int(
+            os.environ.get("RECONCILE_INTERVAL_SECONDS", "900")  # 15 min default
+        ),
     }
 
 
@@ -92,33 +99,47 @@ IMS_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/token/v3"
 IMS_AUTHORIZE_URL = "https://ims-na1.adobelogin.com/ims/authorize/v2"
 
 
-def _load_refresh_token() -> str | None:
-    """Read refresh_token from the writable tokens file (separate from frameio.json)."""
+def _load_state() -> dict:
+    """Read the writable state JSON.
+
+    Contains refresh_token plus any auto-discovered settings (c2c_folder_id,
+    c2c_account_id) persisted across container restarts.
+    """
     path = Path(CFG["refresh_token_file"])
     if not path.exists():
-        return None
+        return {}
     try:
-        return json.loads(path.read_text()).get("refresh_token")
+        return json.loads(path.read_text())
     except Exception as exc:
-        log.warning("Failed to read refresh token from %s: %s", path, exc)
-        return None
+        log.warning("Failed to read state file %s: %s", path, exc)
+        return {}
 
 
-def _save_refresh_token(token: str) -> None:
-    """In-place write of refresh_token to disk, mode 600.
+def _save_state(updates: dict) -> None:
+    """Merge updates into the state file and write in-place, mode 600.
 
     NOTE: Cannot use atomic temp+rename because Docker bind-mounted SINGLE files
     pin the destination inode (os.replace raises EBUSY). The file is mounted, not
     its directory, so we must write to the existing inode. Atomicity is lost but
-    acceptable for this small infrequent write.
+    acceptable for these small infrequent writes.
     """
     path = Path(CFG["refresh_token_file"])
-    path.write_text(json.dumps({"refresh_token": token}))
+    state = _load_state()
+    state.update(updates)
+    path.write_text(json.dumps(state))
     try:
         path.chmod(0o600)
     except Exception:
         pass  # bind-mounted file may not allow chmod
-    log.info("Refresh token persisted to %s", path)
+
+
+def _load_refresh_token() -> str | None:
+    return _load_state().get("refresh_token")
+
+
+def _save_refresh_token(token: str) -> None:
+    _save_state({"refresh_token": token})
+    log.info("Refresh token persisted to %s", CFG["refresh_token_file"])
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +206,11 @@ async def notify_failure(kind: str, detail: str, throttle_minutes: int = 15) -> 
 FRAMEIO_API = "https://api.frame.io/v4"
 _REFRESH_BEFORE_EXPIRY = 300  # seconds
 
+# Per-asset in-flight set — prevents a webhook and a reconcile sweep from
+# both downloading the same file concurrently (which would corrupt the .tmp).
+_IN_FLIGHT: set[str] = set()
+_IN_FLIGHT_LOCK = asyncio.Lock()
+
 
 async def _fetch_token(client: httpx.AsyncClient) -> str:
     """Get an Adobe IMS Bearer token.
@@ -247,6 +273,101 @@ async def get_token(client: httpx.AsyncClient) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reconciliation: periodic sweep of the C2C folder to catch missed webhooks
+# ---------------------------------------------------------------------------
+async def reconcile_once() -> int:
+    """Walk the C2C folder and process any orphan files. Returns count processed."""
+    folder_id = CFG["c2c_folder_id"] or _load_state().get("c2c_folder_id")
+    account_id = CFG["c2c_account_id"] or _load_state().get("c2c_account_id")
+    if not (folder_id and account_id):
+        log.debug("Reconcile skipped — no folder_id discovered yet")
+        return 0
+    if not (CFG["adobe_client_id"] and CFG["adobe_client_secret"]):
+        return 0
+
+    orphans: list[str] = []
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        token = await get_token(client)
+        auth = {"Authorization": f"Bearer {token}"}
+        # First page hits the canonical endpoint with our query params.
+        # Subsequent pages: Frame.io returns `links.next` as a URL (relative or
+        # absolute) that already encodes the `after` cursor — follow it directly
+        # rather than parsing the cursor out. Cap at 20 pages = 2000 files.
+        url: str = f"{FRAMEIO_API}/accounts/{account_id}/folders/{folder_id}/files"
+        params: dict | None = {"page_size": 100}
+        for _ in range(20):
+            resp = await client.get(url, params=params, headers=auth, timeout=30)
+            if resp.status_code != 200:
+                log.error("Reconcile: list failed HTTP %d %s", resp.status_code, resp.text[:200])
+                await notify_failure(
+                    "reconcile_list_failed",
+                    f"HTTP {resp.status_code} listing folder {folder_id[:8]}…: {resp.text[:200]}",
+                    throttle_minutes=60,
+                )
+                return 0
+            body = resp.json()
+            for item in body.get("data", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                # Only top-level file assets — skip folders, version_stacks, unknown
+                if item.get("type") != "file":
+                    continue
+                aid = item.get("id")
+                if aid:
+                    orphans.append(aid)
+            next_link = (body.get("links") or {}).get("next") if isinstance(body.get("links"), dict) else None
+            if not next_link:
+                break
+            url = next_link if next_link.startswith("http") else f"https://api.frame.io{next_link}"
+            params = None  # cursor is now encoded in url
+
+    if not orphans:
+        log.debug("Reconcile: 0 orphans")
+        return 0
+
+    # Filter out anything a webhook is already processing — those aren't real
+    # orphans, just timing overlap. Snapshot the set under lock to avoid races.
+    async with _IN_FLIGHT_LOCK:
+        in_flight_snapshot = set(_IN_FLIGHT)
+    truly_orphaned = [aid for aid in orphans if aid not in in_flight_snapshot]
+    if not truly_orphaned:
+        log.info("Reconcile: %d file(s) in folder but all in-flight via webhook — skipping", len(orphans))
+        return 0
+
+    log.warning("Reconcile: found %d orphan file(s) — processing", len(truly_orphaned))
+    await notify_failure(
+        "reconcile_orphans_found",
+        f"Reconciliation found {len(truly_orphaned)} file(s) in Frame.io "
+        f"that should have been mirrored (webhook delivery gap?). Processing now.",
+        throttle_minutes=15,
+    )
+    for aid in truly_orphaned:
+        try:
+            await process_asset(account_id, aid)
+        except Exception as exc:
+            log.error("Reconcile: process_asset(%s) raised %s", aid, exc)
+    return len(truly_orphaned)
+
+
+async def reconcile_loop() -> None:
+    """Background loop: kicks off once after a short delay so discovery has a chance,
+    then runs at CFG['reconcile_interval_seconds']. Errors don't kill the loop."""
+    interval = max(60, CFG["reconcile_interval_seconds"])
+    log.info("Reconcile loop armed (every %ds)", interval)
+    # Wait briefly so the first webhook can populate discovery state before our first sweep
+    await asyncio.sleep(30)
+    while True:
+        try:
+            n = await reconcile_once()
+            if n:
+                log.info("Reconcile cycle processed %d orphan(s)", n)
+        except Exception as exc:
+            log.error("Reconcile loop exception: %s", exc, exc_info=True)
+            await notify_failure("reconcile_exception", f"{type(exc).__name__}: {exc}", throttle_minutes=60)
+        await asyncio.sleep(interval)
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 _START_TIME = time.monotonic()
@@ -259,7 +380,16 @@ async def lifespan(app: FastAPI):
         await _tg_send(
             "🟢 frameio-mirror online (alerts active — you'll see ⚠️ on real failures, throttled per kind)"
         )
-    yield
+    # Start reconciliation loop in background
+    task = asyncio.create_task(reconcile_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 app = FastAPI(title="frameio-mirror", version="1.0.0", lifespan=lifespan)
@@ -500,6 +630,20 @@ def _safe_filename(name: str | None, fallback: str) -> str:
 async def process_asset(account_id: str, asset_id: str) -> None:
     """Fetch metadata+download URL via the V4 account-scoped file endpoint
     (one call with ?include=media_links.original), stream to incoming, delete upstream."""
+    # In-flight dedup: skip if another task is already processing this asset
+    async with _IN_FLIGHT_LOCK:
+        if asset_id in _IN_FLIGHT:
+            log.info("Asset %s already in-flight — skipping duplicate", asset_id)
+            return
+        _IN_FLIGHT.add(asset_id)
+    try:
+        await _process_asset_inner(account_id, asset_id)
+    finally:
+        async with _IN_FLIGHT_LOCK:
+            _IN_FLIGHT.discard(asset_id)
+
+
+async def _process_asset_inner(account_id: str, asset_id: str) -> None:
     incoming_dir = Path(CFG["incoming_dir"])
     incoming_dir.mkdir(parents=True, exist_ok=True)
 
@@ -527,6 +671,22 @@ async def process_asset(account_id: str, asset_id: str) -> None:
                 log.warning("Filename sanitized: %r -> %r", filename_raw, filename)
             expected_size = _pick(body, "file_size", "filesize", "size")
 
+            # Discover the C2C ingest folder for reconciliation, persist on first hit
+            data_obj = body.get("data") if isinstance(body.get("data"), dict) else body
+            parent_folder = (
+                (data_obj.get("parent_id") if isinstance(data_obj, dict) else None)
+                or (data_obj.get("folder_id") if isinstance(data_obj, dict) else None)
+                or ((data_obj.get("parent") or {}).get("id") if isinstance(data_obj, dict) else None)
+            )
+            if parent_folder:
+                state = _load_state()
+                if not state.get("c2c_folder_id"):
+                    _save_state({"c2c_folder_id": parent_folder, "c2c_account_id": account_id})
+                    log.info(
+                        "Discovered C2C ingest folder: %s (account=%s) — reconciliation enabled",
+                        parent_folder, account_id,
+                    )
+
             # media_links.original may be at top-level or under data.*
             data = body.get("data") if isinstance(body.get("data"), dict) else body
             media_links = (data.get("media_links") or {}) if isinstance(data, dict) else {}
@@ -539,10 +699,32 @@ async def process_asset(account_id: str, asset_id: str) -> None:
                 log.error("No media_links.original URL in response for %s", asset_id)
                 return
 
-            dest = incoming_dir / filename
-            tmp = incoming_dir / f".tmp.{filename}"
+            # Asset-id-prefixed tmp so two assets with same filename don't race
+            # on the same .tmp path during a webhook+reconcile overlap.
+            tmp = incoming_dir / f".tmp.{asset_id}.{filename}"
 
-            # Stream to a hidden temp file (sorter ignores dotfiles), then atomic
+            # Final dest: if filename collides with an existing file in incoming/
+            # (e.g., two cameras both emit DSCF0001.RAF, or a previous run left
+            # one mid-process), suffix _2, _3, … so we don't silently overwrite.
+            # The sorter's own dedup (xxhash-on-collision) handles cleanup if
+            # the two files turn out to be identical content.
+            dest = incoming_dir / filename
+            if dest.exists():
+                stem = Path(filename).stem
+                ext = Path(filename).suffix
+                n = 2
+                while True:
+                    candidate = incoming_dir / f"{stem}_{n}{ext}"
+                    if not candidate.exists():
+                        dest = candidate
+                        break
+                    n += 1
+                    if n > 100:
+                        log.error("Too many incoming/ collisions for %s — bailing", filename)
+                        return
+                log.warning("Filename collision in incoming/: %s -> %s", filename, dest.name)
+
+            # Stream to the hidden temp file (sorter ignores dotfiles), then atomic
             # rename so the sorter sees the file appear all at once.
             log.info("Downloading %s -> %s", filename, dest)
             downloaded = 0
