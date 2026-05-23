@@ -10,18 +10,30 @@ Config priority: env vars override /etc/frameio.json values.
 import asyncio
 import hashlib
 import hmac
+import html
 import json
 import logging
 import os
 import re
+import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+
+
+def _redact_url(url) -> str:
+    """Strip query + fragment from a URL before logging/alerting — pre-signed
+    download URLs carry temporary AWS credentials in the query string."""
+    try:
+        p = urlsplit(str(url))
+        return f"{p.scheme}://{p.netloc}{p.path}"
+    except Exception:
+        return "<url>"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -71,6 +83,11 @@ def _load_config() -> dict:
         # MUST be overridden to your own public HTTPS endpoint — there's no sane
         # generic default. The same value must be registered in Adobe Dev Console.
         "oauth_redirect_uri": _get("OAUTH_REDIRECT_URI", "oauth_redirect_uri", ""),
+        # Optional shared secret gating /oauth/start on the public endpoint. If
+        # set, /oauth/start requires ?setup=<secret>. Strongly recommended.
+        "oauth_setup_secret": _get("OAUTH_SETUP_SECRET", "oauth_setup_secret", ""),
+        # Reject webhook bodies larger than this (Frame.io payloads are tiny JSON).
+        "webhook_max_bytes": int(os.environ.get("WEBHOOK_MAX_BYTES", "1000000")),
         "refresh_token_file": os.environ.get(
             "REFRESH_TOKEN_FILE", "/etc/frameio-oauth-state.json"
         ),
@@ -490,18 +507,64 @@ async def health():
 # ---------------------------------------------------------------------------
 # OAuth Web App: one-time browser auth dance to obtain a refresh_token.
 # Use this on personal Adobe accounts where S2S isn't available.
+#
+# Security: these endpoints are internet-facing. Three protections:
+#   1. Optional setup secret (?setup=...) gates /oauth/start.
+#   2. CSRF state param: random state minted in /start, verified+consumed in
+#      /callback (prevents a forged callback from injecting someone else's code).
+#   3. Re-enrollment lockout: once a refresh_token exists, /start refuses unless
+#      &force=1 — stops a visitor from overwriting our token with their own
+#      Adobe account.
 # ---------------------------------------------------------------------------
+_OAUTH_STATES: dict[str, float] = {}  # state -> created monotonic ts
+_OAUTH_STATE_TTL = 600  # 10 minutes
+
+
+def _prune_oauth_states() -> None:
+    now = time.monotonic()
+    for s, ts in list(_OAUTH_STATES.items()):
+        if now - ts > _OAUTH_STATE_TTL:
+            _OAUTH_STATES.pop(s, None)
+
+
 @app.get("/oauth/start")
-async def oauth_start():
+async def oauth_start(setup: str = ""):
     """Redirect the user to Adobe IMS to grant access. Visit this URL in a browser
     after deploying the container; you'll be sent back to /oauth/callback with a code."""
     if not (CFG["adobe_client_id"] and CFG["adobe_client_secret"]):
         raise HTTPException(503, "Adobe client_id/secret not configured")
+    if not CFG["oauth_redirect_uri"]:
+        raise HTTPException(503, "oauth_redirect_uri not configured")
+
+    # Enrollment authorization:
+    #  - If OAUTH_SETUP_SECRET is configured, every enrollment (fresh or re-auth)
+    #    must pass ?setup=<secret>. Strongest.
+    #  - If no secret is configured, allow FRESH enrollment (first-time setup) but
+    #    REFUSE re-enrollment once a refresh_token exists — otherwise a visitor
+    #    could /oauth/start, authorize their own Adobe account, and break the
+    #    mirror. To re-auth without a secret, clear refresh_token from the state
+    #    file (filesystem access == admin boundary).
+    setup_secret = CFG["oauth_setup_secret"]
+    if setup_secret:
+        if not secrets.compare_digest(setup, setup_secret):
+            log.warning("oauth/start rejected — missing/invalid setup secret")
+            raise HTTPException(403, "Missing or invalid setup secret")
+    elif _load_refresh_token():
+        raise HTTPException(
+            409,
+            "Already authenticated. To re-enroll: set OAUTH_SETUP_SECRET and pass "
+            "?setup=..., or clear refresh_token from the state file first.",
+        )
+
+    _prune_oauth_states()
+    state = secrets.token_urlsafe(32)
+    _OAUTH_STATES[state] = time.monotonic()
     params = {
         "client_id": CFG["adobe_client_id"],
         "scope": CFG["adobe_scopes"],
         "response_type": "code",
         "redirect_uri": CFG["oauth_redirect_uri"],
+        "state": state,
     }
     url = f"{IMS_AUTHORIZE_URL}?" + urlencode(params)
     log.info("Redirecting to IMS authorize: scope=%s", CFG["adobe_scopes"])
@@ -513,12 +576,22 @@ async def oauth_callback(
     code: str = "",
     error: str = "",
     error_description: str = "",
+    state: str = "",
 ):
     """Exchange the authorization code for tokens, persist the refresh_token."""
     if error:
         return HTMLResponse(
-            f"<h1>Adobe auth failed</h1><p><b>{error}</b>: {error_description}</p>",
+            f"<h1>Adobe auth failed</h1><p><b>{html.escape(error)}</b>: "
+            f"{html.escape(error_description)}</p>",
             status_code=400,
+        )
+    # Verify + consume CSRF state
+    _prune_oauth_states()
+    if not state or _OAUTH_STATES.pop(state, None) is None:
+        log.warning("oauth/callback rejected — invalid or expired state")
+        return HTMLResponse(
+            "<h1>Invalid or expired state</h1><p>Restart the flow from /oauth/start.</p>",
+            status_code=403,
         )
     if not code:
         return HTMLResponse("<h1>Missing code parameter</h1>", status_code=400)
@@ -538,17 +611,22 @@ async def oauth_callback(
         )
         if resp.status_code != 200:
             log.error("Token exchange failed: HTTP %d %s", resp.status_code, resp.text[:300])
+            # Generic browser-visible error; details are in the logs only
             return HTMLResponse(
-                f"<h1>Token exchange failed</h1><pre>HTTP {resp.status_code}\n{resp.text[:1000]}</pre>",
+                f"<h1>Token exchange failed</h1><p>HTTP {resp.status_code}. "
+                "Check container logs for details.</p>",
                 status_code=500,
             )
         body = resp.json()
         if "refresh_token" not in body:
-            log.error("IMS response missing refresh_token: %s", {k: v for k, v in body.items() if k != "access_token"})
+            _SECRETISH = ("token", "secret", "code", "authorization")
+            safe = {k: v for k, v in body.items()
+                    if not any(s in k.lower() for s in _SECRETISH)}
+            log.error("IMS response missing refresh_token; non-secret fields: %s", safe)
             return HTMLResponse(
                 "<h1>No refresh_token in response</h1>"
                 "<p>Adobe didn't return a refresh_token. Check the Web App credential's scopes — "
-                "you may need <code>offline_access</code> or equivalent.</p>",
+                "you need <code>offline_access</code>.</p>",
                 status_code=500,
             )
         # Cache the access token FIRST — even if disk persist fails (e.g., readonly
@@ -562,9 +640,9 @@ async def oauth_callback(
             log.error("Failed to persist refresh_token to disk: %s — token remains in memory only", exc)
             return HTMLResponse(
                 "<h1>⚠️ Partial success</h1>"
-                f"<p>Got tokens from Adobe but couldn't write to <code>{CFG['refresh_token_file']}</code>: <pre>{exc}</pre></p>"
-                "<p>The access token works for this process only — container restart loses it. "
-                "Check the mount, then re-visit /oauth/start.</p>",
+                "<p>Got tokens from Adobe but couldn't write the state file "
+                "(check the mount). The access token works for this process only — "
+                "a container restart loses it. Fix the mount, then re-visit /oauth/start.</p>",
                 status_code=500,
             )
 
@@ -583,7 +661,16 @@ async def webhook(
     x_frameio_signature: str = Header(default=""),
     x_frameio_request_timestamp: str = Header(default=""),
 ):
+    # Bound the body before reading it — unauthenticated public endpoint, don't
+    # let a huge POST exhaust memory before HMAC rejection. Frame.io payloads are
+    # a few hundred bytes.
+    max_bytes = CFG["webhook_max_bytes"]
+    clen = request.headers.get("content-length")
+    if clen and clen.isdigit() and int(clen) > max_bytes:
+        raise HTTPException(status_code=413, detail="Payload too large")
     raw_body = await request.body()
+    if len(raw_body) > max_bytes:
+        raise HTTPException(status_code=413, detail="Payload too large")
 
     _verify_signature(
         CFG["webhook_secret"],
@@ -740,30 +827,11 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> str:
             # on the same .tmp path during a webhook+reconcile overlap.
             tmp = incoming_dir / f".tmp.{asset_id}.{filename}"
 
-            # Final dest: if filename collides with an existing file in incoming/
-            # (e.g., two cameras both emit DSCF0001.RAF, or a previous run left
-            # one mid-process), suffix _2, _3, … so we don't silently overwrite.
-            # The sorter's own dedup (xxhash-on-collision) handles cleanup if
-            # the two files turn out to be identical content.
-            dest = incoming_dir / filename
-            if dest.exists():
-                stem = Path(filename).stem
-                ext = Path(filename).suffix
-                n = 2
-                while True:
-                    candidate = incoming_dir / f"{stem}_{n}{ext}"
-                    if not candidate.exists():
-                        dest = candidate
-                        break
-                    n += 1
-                    if n > 100:
-                        log.error("Too many incoming/ collisions for %s — bailing", filename)
-                        return "collision_overflow"
-                log.warning("Filename collision in incoming/: %s -> %s", filename, dest.name)
-
             # Stream to the hidden temp file (sorter ignores dotfiles), then atomic
-            # rename so the sorter sees the file appear all at once.
-            log.info("Downloading %s -> %s", filename, dest)
+            # rename so the sorter sees the file appear all at once. The final name
+            # is resolved at publish time below — NOT here — to avoid clobbering a
+            # file another path (FTP) creates during the download window.
+            log.info("Downloading %s", filename)
             downloaded = 0
             async with client.stream("GET", download_url, timeout=300) as stream:
                 # On a streaming response, raise_for_status() can't include the
@@ -798,7 +866,24 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> str:
             else:
                 log.info("No size in metadata for %s — skipping size check", filename)
 
-            tmp.replace(dest)  # atomic on same filesystem; sorter sees moved_to
+            # Publish: resolve the final name NOW (not before the download). FTP or
+            # another task may have created the same name during the multi-second
+            # download window. The exists()→replace() window here is microseconds,
+            # and the sorter's xxhash dedup is the backstop for a true simultaneous
+            # collision. replace() (rename) fires inotify moved_to → instant pickup.
+            stem, ext = Path(filename).stem, Path(filename).suffix
+            dest = incoming_dir / filename
+            n = 2
+            while dest.exists():
+                dest = incoming_dir / f"{stem}_{n}{ext}"
+                n += 1
+                if n > 100:
+                    log.error("Too many incoming/ collisions for %s — leaving tmp", filename)
+                    return "collision_overflow"
+            if dest.name != filename:
+                log.warning("Filename collision in incoming/: %s -> %s", filename, dest.name)
+            tmp.replace(dest)  # rename → sorter sees moved_to
+            log.info("Published %s", dest.name)
 
             # Delete upstream to keep Frame.io free tier clear
             log.info("Deleting asset %s from Frame.io", asset_id)
@@ -819,18 +904,24 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> str:
 
         except httpx.HTTPStatusError as exc:
             sc = exc.response.status_code
+            safe_url = _redact_url(exc.request.url)  # strip pre-signed AWS creds in query
             log.error(
-                "HTTP error processing asset %s: %s %s",
-                asset_id, sc, exc.response.text[:200],
+                "HTTP error processing asset %s: %s %s (%s)",
+                asset_id, sc, exc.response.text[:200], safe_url,
             )
             await notify_failure(
                 f"http_{sc}",
-                f"Asset {asset_id[:8]}…: HTTP {sc} from {exc.request.url}\n{exc.response.text[:300]}",
+                f"Asset {asset_id[:8]}…: HTTP {sc} from {safe_url}\n{exc.response.text[:300]}",
                 throttle_minutes=15,
             )
             return f"http_{sc}"
         except Exception as exc:
             log.error("Unexpected error processing asset %s: %s", asset_id, exc, exc_info=True)
+            await notify_failure(
+                "asset_exception",
+                f"Asset {asset_id[:8]}…: {type(exc).__name__}: {str(exc)[:300]}",
+                throttle_minutes=15,
+            )
             return "error"
             await notify_failure(
                 "asset_exception",
