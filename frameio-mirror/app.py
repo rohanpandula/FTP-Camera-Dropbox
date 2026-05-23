@@ -44,6 +44,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("frameio-mirror")
 
+# Group-writable output so downloaded files land as nobody:users 664 and are
+# deletable over SMB (paired with running the container as 99:100).
+os.umask(0o002)
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------

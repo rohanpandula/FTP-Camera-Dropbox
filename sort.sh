@@ -1,6 +1,11 @@
 #!/bin/bash
 set -u
 
+# Group-writable by default so files/dirs the sorter creates are deletable over
+# SMB (Unraid maps SMB users into the `users` group). Combined with running the
+# container as 99:100 (nobody:users), output lands as nobody:users 664/775.
+umask 002
+
 INCOMING="${INCOMING:-/data/incoming}"
 SORTED="${SORTED:-/data/sorted}"
 QUARANTINE="${QUARANTINE:-/data/quarantine}"
@@ -92,8 +97,16 @@ get_camera() {
 }
 
 wait_stable() {
-  local f=$1 a b
+  local f=$1 a b now mtime
   a=$(stat -c %s "$f" 2>/dev/null) || return 1
+  # Fast path: if the file hasn't been written in STABLE_WAIT seconds it's
+  # already settled (draining a backlog, or a finished/paused upload) — no point
+  # sleeping. Fresh uploads (recent mtime) still get the full wait to outlast
+  # camera retry storms; validate_file() remains the backstop for truncation.
+  now=$(date +%s); mtime=$(stat -c %Y "$f" 2>/dev/null || echo "$now")
+  if (( now - mtime >= STABLE_WAIT )); then
+    return 0
+  fi
   sleep "$STABLE_WAIT"
   b=$(stat -c %s "$f" 2>/dev/null) || return 1
   [[ "$a" == "$b" ]]
