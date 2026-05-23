@@ -10,17 +10,19 @@ Frame.io's C2C is the cleanest cloud-upload path for a lot of modern bodies (Son
 
 This service treats Frame.io as a transit medium, not storage. Files arrive → get mirrored to your NAS → optionally deleted upstream. Your library stays on your own disks, your quota stays empty.
 
-## Two modes
+## What you need (no webhook-only shortcut)
 
-| | Webhook-only (no Adobe) | With Adobe credentials |
+The Frame.io V4 webhook payload contains **only a resource ID** — no filename, size, or pre-signed URL ([docs](https://developer.adobe.com/frameio/api/current/guides/webhooks/): *"We do not include any additional information beyond the resource ID"*). So there is no "webhook-only" mode: every download goes through the authenticated V4 API. You need two things:
+
+1. **A webhook signing secret** (`FRAMEIO_WEBHOOK_SECRET`). Frame.io shows it once when you create the webhook. The service **fails closed** (HTTP 503) on unsigned requests — required for a public endpoint.
+2. **Adobe credentials** to call the API (fetch metadata + download URL, then delete). Two auth modes depending on your Adobe account type:
+
+| Auth mode | For | How |
 |---|---|---|
-| Receive webhook + verify signature | ✅ | ✅ |
-| Download asset via pre-signed URL in payload | ✅ | ✅ |
-| Download via API if payload lacks pre-signed URL | ❌ | ✅ |
-| **Auto-delete from Frame.io after mirror** | ❌ | ✅ |
-| Setup time | 5 min | 15 min |
+| **OAuth Server-to-Server** | Enterprise Adobe orgs | Paste `client_id` + `client_secret`; headless, set-and-forget |
+| **OAuth Web App + refresh token** | Personal Adobe accounts (no S2S option) | One-time browser dance via `/oauth/start`; refresh token persisted, auto-refreshes forever |
 
-Webhook-only is enough if Frame.io's V4 webhook payload includes `resource.media_links.original.url` (a pre-signed S3 URL). Start there — `docker logs frameio-mirror` will tell you within one upload whether the payload has it. Add Adobe later if you want auto-deletion or the payload turns out to lack the URL.
+Most individuals are the second case — see the Adobe Developer Console walkthrough below.
 
 ## Quickstart
 
@@ -45,15 +47,18 @@ You now need to expose `:8000` to the public internet so Frame.io can POST to it
 4. **Webhook URL:** `https://your-domain.example.com/webhook`
 5. **Status:** Enabled.
 6. **Workspace:** select the one your C2C device is paired with.
-7. Save. Frame.io may show a webhook secret on creation — if it does, copy it into `FRAMEIO_WEBHOOK_SECRET` (or `frameio.json`) and restart the container. Without it, the service logs a warning and accepts webhooks unverified, which is fine on a LAN-internal URL but risky on a public endpoint.
+7. Save. Frame.io shows the **webhook signing secret** on creation — copy it into `FRAMEIO_WEBHOOK_SECRET` (or `frameio.json`) and restart. **This is required**: the service rejects unsigned webhooks with HTTP 503 (fails closed), so without the secret nothing will process.
 
 Now upload one frame from a C2C-paired device. Watch `docker logs -f frameio-mirror`. You should see:
 
 ```
-[INFO] Received file.ready: id=abc123 name=DSC00042.ARW size=64618496
-[INFO] Downloading DSC00042.ARW -> /data/incoming/DSC00042.ARW
+[INFO] Signature verified (drift=0s)
+[INFO] Webhook: type=file.ready resource.type=file resource.id=abc123 account.id=...
+[INFO] Fetching file abc123
+[INFO] Downloading DSC00042.ARW
 [INFO] Downloaded 64618496 bytes for DSC00042.ARW
 [INFO] Size verified for DSC00042.ARW (64618496 bytes)
+[INFO] Asset abc123 deleted from Frame.io
 ```
 
 Followed by the sorter picking it up:

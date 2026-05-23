@@ -67,12 +67,18 @@ services:
     profiles: ["frameio"]
     environment:
       INCOMING_DIR: /data/incoming
-      # All four below are optional. Without them the service still receives
-      # webhooks and tries the pre-signed URL path from the payload.
+      # FRAMEIO_WEBHOOK_SECRET is REQUIRED for any public deployment — the service
+      # fails closed (503) on unsigned webhooks. ADOBE_* are required to download
+      # and delete assets (the V4 webhook payload is just an ID — there is no
+      # pre-signed-URL shortcut; every download goes through the authed API).
       FRAMEIO_WEBHOOK_SECRET: ${FRAMEIO_WEBHOOK_SECRET:-}
       ADOBE_CLIENT_ID: ${ADOBE_CLIENT_ID:-}
       ADOBE_CLIENT_SECRET: ${ADOBE_CLIENT_SECRET:-}
-      ADOBE_SCOPES: ${ADOBE_SCOPES:-openid,AdobeID,additional_info.roles}
+      # offline_access is REQUIRED for the OAuth Web App refresh-token flow.
+      ADOBE_SCOPES: ${ADOBE_SCOPES:-openid,AdobeID,additional_info.roles,offline_access,profile,email}
+      # Optional: gate /oauth/start on a shared secret (?setup=...) for public endpoints.
+      OAUTH_SETUP_SECRET: ${OAUTH_SETUP_SECRET:-}
+      OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-}
     volumes:
       # Same volume as ftp+sorter — downloads land where the sorter is watching:
       - camera_data:/data
@@ -92,10 +98,20 @@ services:
       # before first start, then mount it RW (not :ro).
       # - ./oauth-state.json:/etc/frameio-oauth-state.json
     ports:
-      - "8000:8000"
+      # Bind to localhost only — expose publicly via a reverse proxy / tunnel
+      # (Cloudflare Tunnel, Caddy, etc.), not by opening the host's LAN interface.
+      # On Unraid with a dedicated br0 IP you can drop this block entirely and
+      # point the tunnel straight at the container IP:8000.
+      - "127.0.0.1:8000:8000"
     networks:
       - camera_net
     restart: unless-stopped
+    # Internet-facing service — drop all caps (it only needs outbound HTTPS +
+    # file writes via volume perms) and block privilege escalation.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 networks:
   camera_net:

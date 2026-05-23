@@ -48,15 +48,27 @@ get_type() {
   esac
 }
 
+# Strip control chars (tab/newline/CR/NUL/etc.) and cap length. EXIF strings and
+# filenames are attacker-influenceable and flow into the TSV notify queue and
+# Telegram messages — a stray tab/newline could forge rows or corrupt logs.
+sanitize() {
+  printf '%s' "$1" | tr -d '\000-\037\177' | cut -c1-100
+}
+
 get_date() {
-  local f=$1 d y
+  local f=$1 d
   d=$(exiftool -d '%Y-%m-%d' -DateTimeOriginal -CreateDate -ModifyDate -s3 "$f" 2>/dev/null | head -n1)
-  if [[ -n "$d" && "$d" != "-" ]]; then
-    y="${d%%-*}"
-    if [[ "$y" =~ ^[0-9]+$ && "$y" -ge 1990 && "$y" -le 2100 ]]; then
+  # Accept ONLY a strict YYYY-MM-DD with plausible components, else fall back to
+  # mtime. Prevents a malformed/attacker EXIF date (e.g. "2024-13-99" or text with
+  # a leading year) from becoming a bogus path component.
+  if [[ "$d" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
+    local y=${BASH_REMATCH[1]} mo=${BASH_REMATCH[2]} da=${BASH_REMATCH[3]}
+    if (( y >= 1990 && y <= 2100 && 10#$mo >= 1 && 10#$mo <= 12 && 10#$da >= 1 && 10#$da <= 31 )); then
       echo "$d"; return
     fi
-    log "exif date suspicious '$d' for $(basename "$f") — using mtime"
+    log "exif date out-of-range '$d' for $(basename "$f") — using mtime"
+  elif [[ -n "$d" && "$d" != "-" ]]; then
+    log "exif date malformed '$d' for $(basename "$f") — using mtime"
   else
     log "no exif date for $(basename "$f") — using mtime"
   fi
@@ -65,8 +77,8 @@ get_date() {
 
 get_camera() {
   local f=$1 make model
-  make=$(exiftool -Make -s3 "$f" 2>/dev/null | head -n1)
-  model=$(exiftool -Model -s3 "$f" 2>/dev/null | head -n1)
+  make=$(sanitize "$(exiftool -Make -s3 "$f" 2>/dev/null | head -n1)")
+  model=$(sanitize "$(exiftool -Model -s3 "$f" 2>/dev/null | head -n1)")
   # collapse redundant words (NIKON CORPORATION NIKON Z 9 -> NIKON Z 9)
   if [[ -n "$make" && "$model" == "$make "* ]]; then
     echo "$model"
@@ -141,7 +153,8 @@ move_with_suffix() {
 
 # --- Notification queue (append per successful sort, flush every NOTIFY_INTERVAL seconds) ---
 enqueue_notify() {
-  local camera=$1 type=$2 basename=$3
+  local camera type basename
+  camera=$(sanitize "$1"); type=$(sanitize "$2"); basename=$(sanitize "$3")
   {
     flock -x 200
     printf '%s\t%s\t%s\t%s\n' "$(date '+%H:%M:%S')" "$camera" "$type" "$basename" >> "$NOTIFY_QUEUE"
