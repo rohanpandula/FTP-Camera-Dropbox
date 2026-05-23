@@ -2,7 +2,7 @@
 
 Optional companion to the FTP Camera Dropbox: receives [Frame.io Camera-to-Cloud](https://frame.io/c2c) webhooks, downloads new assets into the same `incoming/` directory the sorter watches, and (optionally) deletes them from Frame.io to keep the 2 GB free-tier quota clear.
 
-The sorter doesn't know or care that the file came from Frame.io instead of an FTP upload — it goes through the exact same `wait_stable → validate → date-sort → quarantine-or-sorted` pipeline. From your file tree's perspective, your camera's C2C feed and its FTP feed merge cleanly into one library.
+The sorter doesn't know or care that a file came from Frame.io instead of FTP; it runs the same `wait_stable → validate → date-sort → quarantine-or-sorted` pipeline either way. As far as your file tree is concerned, the C2C feed and the FTP feed are one library.
 
 ## Why this exists
 
@@ -12,17 +12,17 @@ This service treats Frame.io as a transit medium, not storage. Files arrive → 
 
 ## What you need (no webhook-only shortcut)
 
-The Frame.io V4 webhook payload contains **only a resource ID** — no filename, size, or pre-signed URL ([docs](https://developer.adobe.com/frameio/api/current/guides/webhooks/): *"We do not include any additional information beyond the resource ID"*). So there is no "webhook-only" mode: every download goes through the authenticated V4 API. You need two things:
+The Frame.io V4 webhook payload contains **only a resource ID**: no filename, size, or pre-signed URL. The [docs](https://developer.adobe.com/frameio/api/current/guides/webhooks/) are explicit: *"We do not include any additional information beyond the resource ID."* So there's no "webhook-only" mode. Every download goes through the authenticated V4 API, and you need two things:
 
-1. **A webhook signing secret** (`FRAMEIO_WEBHOOK_SECRET`). Frame.io shows it once when you create the webhook. The service **fails closed** (HTTP 503) on unsigned requests — required for a public endpoint.
+1. **A webhook signing secret** (`FRAMEIO_WEBHOOK_SECRET`). Frame.io shows it once when you create the webhook. The service **fails closed** (HTTP 503) on unsigned requests, which is what you want on a public endpoint.
 2. **Adobe credentials** to call the API (fetch metadata + download URL, then delete). Two auth modes depending on your Adobe account type:
 
 | Auth mode | For | How |
 |---|---|---|
-| **OAuth Server-to-Server** | Enterprise Adobe orgs | Paste `client_id` + `client_secret`; headless, set-and-forget |
-| **OAuth Web App + refresh token** | Personal Adobe accounts (no S2S option) | One-time browser dance via `/oauth/start`; refresh token persisted, auto-refreshes forever |
+| **OAuth Server-to-Server** | Enterprise Adobe orgs | Paste `client_id` + `client_secret`; headless, no further steps |
+| **OAuth Web App + refresh token** | Personal Adobe accounts (no S2S option) | Sign in once via `/oauth/start`; the refresh token is persisted and renews on its own |
 
-Most individuals are the second case — see the Adobe Developer Console walkthrough below.
+Most individuals land in the second case. See the Adobe Developer Console walkthrough below.
 
 ## Quickstart
 
@@ -47,7 +47,7 @@ You now need to expose `:8000` to the public internet so Frame.io can POST to it
 4. **Webhook URL:** `https://your-domain.example.com/webhook`
 5. **Status:** Enabled.
 6. **Workspace:** select the one your C2C device is paired with.
-7. Save. Frame.io shows the **webhook signing secret** on creation — copy it into `FRAMEIO_WEBHOOK_SECRET` (or `frameio.json`) and restart. **This is required**: the service rejects unsigned webhooks with HTTP 503 (fails closed), so without the secret nothing will process.
+7. Save. Frame.io shows the **webhook signing secret** on creation. Copy it into `FRAMEIO_WEBHOOK_SECRET` (or `frameio.json`) and restart. **This is required**: the service rejects unsigned webhooks with HTTP 503 (fails closed), so without the secret nothing will process.
 
 Now upload one frame from a C2C-paired device. Watch `docker logs -f frameio-mirror`. You should see:
 
@@ -69,7 +69,7 @@ Followed by the sorter picking it up:
 
 ## Adobe Developer Console setup (only needed for auto-delete)
 
-Frame.io's V4 API authenticates via Adobe IMS — there's no per-user API key anymore. One-time setup:
+Frame.io's V4 API authenticates via Adobe IMS. There's no per-user API key anymore. One-time setup:
 
 1. Go to <https://developer.adobe.com/console>, sign in with the same account that owns your Frame.io workspace.
 2. **Create new project** → **Add API** → search for **Frame.io API** → Next.
@@ -110,16 +110,16 @@ The `/webhook` and `/oauth/*` endpoints are reachable from the internet, so:
 
 - **Webhook signatures fail closed.** No `FRAMEIO_WEBHOOK_SECRET` → every webhook is rejected with 503. Frame.io's `v0:<timestamp>:<body>` HMAC is verified with a ±5 min replay window.
 - **OAuth is CSRF-protected.** `/oauth/start` mints a random `state`; `/oauth/callback` verifies and consumes it.
-- **Re-enrollment is locked.** Once a refresh token exists, `/oauth/start` refuses (HTTP 409) — so a visitor can't authorize *their* Adobe account and hijack the mirror. To re-enroll: set `OAUTH_SETUP_SECRET` and pass `?setup=<secret>`, or clear `refresh_token` from the state file (filesystem access = admin).
+- **Re-enrollment is locked.** Once a refresh token exists, `/oauth/start` refuses with HTTP 409, so a visitor can't authorize *their* Adobe account and hijack the mirror. To re-enroll, either set `OAUTH_SETUP_SECRET` and pass `?setup=<secret>`, or clear `refresh_token` from the state file (filesystem access is the admin boundary).
 - **No secret leakage.** Error pages are HTML-escaped (no reflected XSS); pre-signed download URLs are stripped of their query string before logging/alerting.
 - **Runs non-root.** Deploy with `--user 99:100` (Unraid `nobody:users`); `umask 002` so downloads are group-writable (and SMB-deletable).
 
 ## Reconciliation (catch missed webhooks)
 
-Frame.io retries a failed webhook 5 times then gives up — so a long outage could orphan a file in Frame.io forever. A background sweep (every `RECONCILE_INTERVAL_SECONDS`, default 15 min) lists the C2C ingest folder and mirrors anything that's still there.
+Frame.io retries a failed webhook 5 times, then gives up, so a long outage could orphan a file in Frame.io forever. A background sweep (every `RECONCILE_INTERVAL_SECONDS`, default 15 min) lists the C2C ingest folder and mirrors anything still sitting there.
 
-- The folder ID is **auto-discovered** from the first `file.ready` webhook and persisted to the state file; override with `FRAMEIO_C2C_FOLDER_ID`.
-- Files that can't be downloaded (persistent 403/404 — "ghost" records whose bytes never committed) are added to a skip-list so they don't re-alert every sweep. One throttled notice tells you to delete them from Frame.io's UI.
+- The folder ID is **auto-discovered** from the first `file.ready` webhook and persisted to the state file. Override it with `FRAMEIO_C2C_FOLDER_ID`.
+- Files that can't be downloaded (persistent 403/404, the "ghost" records whose bytes never committed) go on a skip-list so they don't re-alert every sweep. One throttled notice tells you to delete them from Frame.io's UI.
 - An in-flight guard prevents a sweep and a live webhook from double-downloading the same asset.
 
 ## Telegram alerts on failure (optional)
@@ -135,7 +135,7 @@ If you mount the same `telegram.json` the sorter uses at `/etc/telegram.json`, t
 
 Throttling is per-kind in memory, so a single broken state doesn't fan out into a spam loop. Resets on container restart (a fresh start gets one ping per error type even if you just saw one).
 
-You also get a one-time 🟢 startup ping each time the container boots — confirms the credentials are reaching Telegram. If you don't see one, the mount isn't working.
+You also get a one-time 🟢 startup ping when the container boots. If it arrives, the credentials are reaching Telegram; if not, the mount isn't working.
 
 The success path is silent. The sorter handles the "files landed" notifications via its own 5-min batched queue.
 
