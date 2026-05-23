@@ -57,16 +57,20 @@ def _load_config() -> dict:
     return {
         "adobe_client_id": _get("ADOBE_CLIENT_ID", "adobe_client_id"),
         "adobe_client_secret": _get("ADOBE_CLIENT_SECRET", "adobe_client_secret"),
+        # offline_access is REQUIRED for the OAuth Web App flow to return a
+        # refresh_token. Without it, the auth dance succeeds but the next
+        # restart loses the access token. profile/email are harmless and
+        # commonly expected by Adobe IMS. AdobeID/openid are standard.
         "adobe_scopes": _get(
-            "ADOBE_SCOPES", "adobe_scopes", "openid,AdobeID,additional_info.roles"
+            "ADOBE_SCOPES", "adobe_scopes",
+            "openid,AdobeID,additional_info.roles,offline_access,profile,email",
         ),
         "webhook_secret": _get("FRAMEIO_WEBHOOK_SECRET", "frameio_webhook_secret"),
         "incoming_dir": os.environ.get("INCOMING_DIR", "/data/incoming"),
-        # OAuth Web App flow (used when S2S isn't available on the Adobe account):
-        "oauth_redirect_uri": _get(
-            "OAUTH_REDIRECT_URI", "oauth_redirect_uri",
-            "https://c2c.roflix.club/oauth/callback",
-        ),
+        # OAuth Web App flow (used when S2S isn't available on the Adobe account).
+        # MUST be overridden to your own public HTTPS endpoint — there's no sane
+        # generic default. The same value must be registered in Adobe Dev Console.
+        "oauth_redirect_uri": _get("OAUTH_REDIRECT_URI", "oauth_redirect_uri", ""),
         "refresh_token_file": os.environ.get(
             "REFRESH_TOKEN_FILE", "/etc/frameio-oauth-state.json"
         ),
@@ -325,13 +329,22 @@ async def reconcile_once() -> int:
         log.debug("Reconcile: 0 orphans")
         return 0
 
-    # Filter out anything a webhook is already processing — those aren't real
-    # orphans, just timing overlap. Snapshot the set under lock to avoid races.
+    # Filter out (a) anything a webhook is already processing — timing overlap,
+    # not a real orphan — and (b) assets we've already classified as unmirrorable
+    # (persistent 403/404: ghost records whose underlying file never committed).
+    # Without (b), a ghost reappears in every sweep, 403s, and re-alerts forever.
     async with _IN_FLIGHT_LOCK:
         in_flight_snapshot = set(_IN_FLIGHT)
-    truly_orphaned = [aid for aid in orphans if aid not in in_flight_snapshot]
+    skip_set = set(_load_state().get("reconcile_skip", []))
+    skipped_ghosts = [a for a in orphans if a in skip_set]
+    if skipped_ghosts:
+        log.info("Reconcile: %d known-unmirrorable ghost(s) skipped", len(skipped_ghosts))
+    truly_orphaned = [
+        aid for aid in orphans
+        if aid not in in_flight_snapshot and aid not in skip_set
+    ]
     if not truly_orphaned:
-        log.info("Reconcile: %d file(s) in folder but all in-flight via webhook — skipping", len(orphans))
+        log.info("Reconcile: %d file(s) in folder, none actionable (in-flight or ghosts)", len(orphans))
         return 0
 
     log.warning("Reconcile: found %d orphan file(s) — processing", len(truly_orphaned))
@@ -341,12 +354,34 @@ async def reconcile_once() -> int:
         f"that should have been mirrored (webhook delivery gap?). Processing now.",
         throttle_minutes=15,
     )
+    processed = 0
+    newly_skipped: list[str] = []
     for aid in truly_orphaned:
         try:
-            await process_asset(account_id, aid)
+            status = await process_asset(account_id, aid)
         except Exception as exc:
             log.error("Reconcile: process_asset(%s) raised %s", aid, exc)
-    return len(truly_orphaned)
+            continue
+        if status == "ok":
+            processed += 1
+        elif status in ("http_403", "http_404"):
+            # Unmirrorable — record so future sweeps don't re-attempt or re-alert
+            newly_skipped.append(aid)
+    if newly_skipped:
+        skip_set.update(newly_skipped)
+        _save_state({"reconcile_skip": sorted(skip_set)})
+        log.warning(
+            "Reconcile: %d asset(s) unmirrorable (403/404) — added to skip-list: %s",
+            len(newly_skipped), ", ".join(a[:8] for a in newly_skipped),
+        )
+        await notify_failure(
+            "reconcile_ghost_skiplisted",
+            f"{len(newly_skipped)} Frame.io asset(s) can't be downloaded (403/404 — "
+            f"likely ghost records with no underlying file). Added to skip-list so "
+            f"they won't re-alert. Delete them from Frame.io's UI when convenient.",
+            throttle_minutes=1440,  # at most once a day
+        )
+    return processed
 
 
 async def reconcile_loop() -> None:
@@ -634,16 +669,18 @@ async def process_asset(account_id: str, asset_id: str) -> None:
     async with _IN_FLIGHT_LOCK:
         if asset_id in _IN_FLIGHT:
             log.info("Asset %s already in-flight — skipping duplicate", asset_id)
-            return
+            return "in_flight"
         _IN_FLIGHT.add(asset_id)
     try:
-        await _process_asset_inner(account_id, asset_id)
+        return await _process_asset_inner(account_id, asset_id)
     finally:
         async with _IN_FLIGHT_LOCK:
             _IN_FLIGHT.discard(asset_id)
 
 
-async def _process_asset_inner(account_id: str, asset_id: str) -> None:
+async def _process_asset_inner(account_id: str, asset_id: str) -> str:
+    """Returns a status string: 'ok', 'no_url', 'size_mismatch',
+    'collision_overflow', 'http_<code>', or 'error'."""
     incoming_dir = Path(CFG["incoming_dir"])
     incoming_dir.mkdir(parents=True, exist_ok=True)
 
@@ -697,7 +734,7 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> None:
                 download_url = original.get("url") or original.get("download_url")
             if not download_url:
                 log.error("No media_links.original URL in response for %s", asset_id)
-                return
+                return "no_url"
 
             # Asset-id-prefixed tmp so two assets with same filename don't race
             # on the same .tmp path during a webhook+reconcile overlap.
@@ -721,7 +758,7 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> None:
                     n += 1
                     if n > 100:
                         log.error("Too many incoming/ collisions for %s — bailing", filename)
-                        return
+                        return "collision_overflow"
                 log.warning("Filename collision in incoming/: %s -> %s", filename, dest.name)
 
             # Stream to the hidden temp file (sorter ignores dotfiles), then atomic
@@ -729,7 +766,15 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> None:
             log.info("Downloading %s -> %s", filename, dest)
             downloaded = 0
             async with client.stream("GET", download_url, timeout=300) as stream:
-                stream.raise_for_status()
+                # On a streaming response, raise_for_status() can't include the
+                # body unless we read it first — otherwise httpx throws a confusing
+                # "Attempted to access streaming response content" error instead of
+                # a clean HTTPStatusError. Read the body on non-2xx so the proper
+                # except httpx.HTTPStatusError handler catches it (e.g. a 403 on a
+                # stale/ghost pre-signed URL during reconciliation).
+                if stream.status_code >= 400:
+                    await stream.aread()
+                    stream.raise_for_status()
                 with tmp.open("wb") as fh:
                     async for chunk in stream.aiter_bytes(chunk_size=65536):
                         fh.write(chunk)
@@ -747,7 +792,7 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> None:
                     throttle_minutes=15,
                 )
                 # keep the partial in tmp so we can inspect
-                return
+                return "size_mismatch"
             if expected_size:
                 log.info("Size verified for %s (%d bytes)", filename, downloaded)
             else:
@@ -770,6 +815,7 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> None:
                     "Failed to delete asset %s: HTTP %d %s",
                     asset_id, del_resp.status_code, del_resp.text[:200],
                 )
+            return "ok"
 
         except httpx.HTTPStatusError as exc:
             sc = exc.response.status_code
@@ -782,8 +828,10 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> None:
                 f"Asset {asset_id[:8]}…: HTTP {sc} from {exc.request.url}\n{exc.response.text[:300]}",
                 throttle_minutes=15,
             )
+            return f"http_{sc}"
         except Exception as exc:
             log.error("Unexpected error processing asset %s: %s", asset_id, exc, exc_info=True)
+            return "error"
             await notify_failure(
                 "asset_exception",
                 f"Asset {asset_id[:8]}…: {type(exc).__name__}: {exc}",
