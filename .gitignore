@@ -1,4 +1,8 @@
 telegram.json
+frameio.json
+oauth-state.json
 .env
 data/
 *.failed.*
+__pycache__/
+*.pyc

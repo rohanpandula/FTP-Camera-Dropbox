@@ -1,6 +1,7 @@
 {
-  "frameio_webhook_secret": "OPTIONAL_FROM_FRAMEIO_WEBHOOK_UI",
-  "adobe_client_id": "OPTIONAL_FROM_ADOBE_DEV_CONSOLE",
-  "adobe_client_secret": "OPTIONAL_FROM_ADOBE_DEV_CONSOLE",
-  "adobe_scopes": "openid,AdobeID,additional_info.roles"
+  "frameio_webhook_secret": "FROM_FRAMEIO_WEBHOOK_UI_AFTER_CREATE",
+  "adobe_client_id": "FROM_ADOBE_DEV_CONSOLE",
+  "adobe_client_secret": "FROM_ADOBE_DEV_CONSOLE",
+  "adobe_scopes": "openid,AdobeID,additional_info.roles,offline_access,profile,email",
+  "oauth_redirect_uri": "https://YOUR_PUBLIC_HOSTNAME/oauth/callback"
 }
