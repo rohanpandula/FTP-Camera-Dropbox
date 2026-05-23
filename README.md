@@ -77,7 +77,7 @@ All settings have sensible defaults. Override via `.env` or environment variable
 | `FTP_USER` | `cameras` | FTP username |
 | `FTP_PASS` | `cameras` | FTP password |
 | `PUBLICHOST` | `127.0.0.1` | IP advertised to clients in PASV mode — **set this to your host LAN IP** |
-| `STABLE_WAIT` | `60` | Seconds to wait for file size to stabilize before processing |
+| `STABLE_WAIT` | `60` | Seconds to wait for a *fresh* file's size to stabilize before processing. Files whose mtime is already older than this (backlog drain, finished uploads) skip the wait entirely. |
 | `NOTIFY_INTERVAL` | `300` | How often to flush the Telegram notification queue (seconds) |
 | `INCOMING` | `/data/incoming` | Directory FTP drops files into |
 | `SORTED` | `/data/sorted` | Destination for successfully sorted files |
@@ -196,13 +196,24 @@ Every `RECONCILE_IDLE` seconds of inotify silence, a full directory scan runs to
 
 ## Optional: Unraid-Specific Notes
 
-If you want cameras to reach the FTP server by hostname instead of raw IP, add an mDNS alias. In `/boot/config/go`:
+**Run the sorter (and Frame.io mirror) as `99:100` so files are deletable over SMB.** If the containers run as root, every `<date>/<type>/` directory they create is owned `root:root` — and an SMB client (a non-root user) can't delete files inside a directory it can't write to, *regardless of the file's own ownership* (POSIX deletion checks the parent directory). Add `--user 99:100` (Unraid's `nobody:users`) to the `docker run`, and the included images set `umask 002` so output lands `nobody:users` `775`/`664` — deletable by any Unraid SMB user (all of whom are in the `users` group):
+
+```bash
+docker run -d --name camera-sorter --user 99:100 \
+  -v /mnt/user/your-share:/data \
+  -v /mnt/user/appdata/camera-sorter/telegram.json:/etc/telegram.json:ro \
+  --restart unless-stopped camera-sorter
+```
+
+Mounted config files (`telegram.json`, `frameio.json`, `oauth-state.json`) must be `chown 99:100` so the non-root container can read them. If you already have a tree owned by `root:root`, fix it once with: `chown -R 99:100 /mnt/user/your-share`.
+
+**Hostname instead of raw IP:** add an mDNS alias in `/boot/config/go`:
 
 ```bash
 nohup /usr/bin/avahi-publish -a -R ftp.local <container-ip> </dev/null >/dev/null 2>&1 &
 ```
 
-After reboot, `ftp.local` resolves on your LAN and you can set that as the server address in the camera menu.
+After reboot, `ftp.local` resolves on your LAN — set that as the server address in the camera menu.
 
 ## License
 

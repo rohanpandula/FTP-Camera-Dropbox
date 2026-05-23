@@ -92,12 +92,35 @@ docker logs frameio-mirror 2>&1 | grep -i "adobe ims"
 | Variable | Default | Description |
 |---|---|---|
 | `INCOMING_DIR` | `/data/incoming` | Where to drop downloaded files (must match the sorter's `INCOMING`) |
-| `FRAMEIO_WEBHOOK_SECRET` | *(unset)* | If set, every webhook is verified via HMAC-SHA256. Strongly recommended for any public endpoint. |
-| `ADOBE_CLIENT_ID` | *(unset)* | Adobe Server-to-Server OAuth client ID. Without it, auto-delete is disabled. |
-| `ADOBE_CLIENT_SECRET` | *(unset)* | Matching client secret. |
-| `ADOBE_SCOPES` | `openid,AdobeID,additional_info.roles` | OAuth scopes requested for the token. |
+| `FRAMEIO_WEBHOOK_SECRET` | *(unset)* | **Required.** HMAC-SHA256 webhook signature key from Frame.io. The service **fails closed** (HTTP 503) on unsigned requests. |
+| `ADOBE_CLIENT_ID` | *(unset)* | **Required.** Adobe OAuth client ID (S2S or Web App). |
+| `ADOBE_CLIENT_SECRET` | *(unset)* | **Required.** Matching client secret. |
+| `ADOBE_SCOPES` | `openid,AdobeID,additional_info.roles,offline_access,profile,email` | OAuth scopes. `offline_access` is required for the Web App refresh-token flow. |
+| `OAUTH_REDIRECT_URI` | *(unset)* | Required for the Web App flow. Must exactly match the redirect URI registered in Adobe Dev Console, e.g. `https://your-host/oauth/callback`. |
+| `OAUTH_SETUP_SECRET` | *(unset)* | Optional. If set, `/oauth/start` requires `?setup=<secret>`. Recommended for public endpoints (see Security below). |
+| `WEBHOOK_MAX_BYTES` | `1000000` | Reject webhook bodies larger than this (Frame.io payloads are tiny). |
+| `RECONCILE_INTERVAL_SECONDS` | `900` | How often the reconciliation sweep runs (see Reconciliation below). |
+| `FRAMEIO_C2C_FOLDER_ID` | *(auto)* | C2C ingest folder for reconciliation. Auto-discovered from the first webhook; set explicitly to override. |
 
 Env vars take precedence over `frameio.json`. Mount the JSON for the secrets-on-disk pattern; use env vars in dev or for one-offs.
+
+## Security (the endpoint is public)
+
+The `/webhook` and `/oauth/*` endpoints are reachable from the internet, so:
+
+- **Webhook signatures fail closed.** No `FRAMEIO_WEBHOOK_SECRET` → every webhook is rejected with 503. Frame.io's `v0:<timestamp>:<body>` HMAC is verified with a ±5 min replay window.
+- **OAuth is CSRF-protected.** `/oauth/start` mints a random `state`; `/oauth/callback` verifies and consumes it.
+- **Re-enrollment is locked.** Once a refresh token exists, `/oauth/start` refuses (HTTP 409) — so a visitor can't authorize *their* Adobe account and hijack the mirror. To re-enroll: set `OAUTH_SETUP_SECRET` and pass `?setup=<secret>`, or clear `refresh_token` from the state file (filesystem access = admin).
+- **No secret leakage.** Error pages are HTML-escaped (no reflected XSS); pre-signed download URLs are stripped of their query string before logging/alerting.
+- **Runs non-root.** Deploy with `--user 99:100` (Unraid `nobody:users`); `umask 002` so downloads are group-writable (and SMB-deletable).
+
+## Reconciliation (catch missed webhooks)
+
+Frame.io retries a failed webhook 5 times then gives up — so a long outage could orphan a file in Frame.io forever. A background sweep (every `RECONCILE_INTERVAL_SECONDS`, default 15 min) lists the C2C ingest folder and mirrors anything that's still there.
+
+- The folder ID is **auto-discovered** from the first `file.ready` webhook and persisted to the state file; override with `FRAMEIO_C2C_FOLDER_ID`.
+- Files that can't be downloaded (persistent 403/404 — "ghost" records whose bytes never committed) are added to a skip-list so they don't re-alert every sweep. One throttled notice tells you to delete them from Frame.io's UI.
+- An in-flight guard prevents a sweep and a live webhook from double-downloading the same asset.
 
 ## Telegram alerts on failure (optional)
 
@@ -118,7 +141,8 @@ The success path is silent. The sorter handles the "files landed" notifications 
 
 ## Behavior notes
 
-- **Size mismatch → no delete.** If the bytes downloaded don't match the size in the webhook payload, the file is kept in `incoming/` (sorter will quarantine it on size-floor failure) and the upstream asset is NOT deleted. You can re-trigger by replaying the webhook from Frame.io.
-- **No webhook secret → warning logged, signature check skipped.** Inside a private network this is fine. On a public endpoint, set one.
+- **Size mismatch → no delete.** If the bytes downloaded don't match the size from the API, the file is kept (sorter quarantines it on size-floor failure) and the upstream asset is NOT deleted. Re-trigger by replaying the webhook from Frame.io.
+- **No webhook secret → fail closed.** Without `FRAMEIO_WEBHOOK_SECRET` the service rejects every webhook with HTTP 503. There is no unsigned mode.
 - **Background-task download.** The webhook handler returns `{"status":"accepted"}` in <100 ms and downloads in a background task. Frame.io won't time out and won't retry-storm on slow uploads.
-- **Token refresh is automatic.** The IMS token is cached and refreshed when within 5 minutes of expiry. No restart needed.
+- **Token refresh is automatic.** The IMS token is cached and refreshed within 5 minutes of expiry (Web App access tokens are 1 h; the refresh token is persisted and reused indefinitely). No restart needed.
+- **Atomic, no-clobber publish.** The final filename is resolved at publish time, not before the download, so a concurrent FTP write can't be silently overwritten; colliding names get a `_2`/`_3` suffix.
