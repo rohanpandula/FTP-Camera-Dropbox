@@ -229,6 +229,44 @@ async def notify_failure(kind: str, detail: str, throttle_minutes: int = 15) -> 
 
 
 FRAMEIO_API = "https://api.frame.io/v4"
+
+# Camera RAW extensions we run exiftool -validate on. Files matching these get
+# a structural-integrity check before the upstream Frame.io copy is deleted,
+# so a corrupted-but-right-sized RAF stays recoverable from Frame.io's trash.
+_RAW_EXTS = {
+    ".raf", ".arw", ".nef", ".cr2", ".cr3", ".dng",
+    ".orf", ".rw2", ".pef", ".srw",
+}
+
+
+def _is_raw(filename: str) -> bool:
+    return Path(filename).suffix.lower() in _RAW_EXTS
+
+
+async def _validate_raw_structure(path: Path) -> str:
+    """Run exiftool -validate on a RAW file. Returns warning text (empty = clean).
+
+    Catches RAFs/NEFs/etc. whose internal IFD is malformed — exiftool stays
+    lenient and parses what it can, but Adobe Camera Raw / Lightroom refuse to
+    load. Returns "" if exiftool isn't installed (graceful fallback).
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "exiftool", "-validate", "-warning", "-a", "-s3", str(path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+        return stdout.decode("utf-8", errors="replace").strip()
+    except asyncio.TimeoutError:
+        log.warning("exiftool validate timed out for %s", path.name)
+        return ""
+    except FileNotFoundError:
+        # exiftool missing from container — older image; skip silently.
+        return ""
+    except Exception as exc:
+        log.warning("exiftool validate failed: %s", exc)
+        return ""
 _REFRESH_BEFORE_EXPIRY = 300  # seconds
 
 # Per-asset in-flight set — prevents a webhook and a reconcile sweep from
@@ -771,7 +809,7 @@ async def process_asset(account_id: str, asset_id: str) -> None:
 
 async def _process_asset_inner(account_id: str, asset_id: str) -> str:
     """Returns a status string: 'ok', 'no_url', 'size_mismatch',
-    'collision_overflow', 'http_<code>', or 'error'."""
+    'collision_overflow', 'kept_upstream_for_recovery', 'http_<code>', or 'error'."""
     incoming_dir = Path(CFG["incoming_dir"])
     incoming_dir.mkdir(parents=True, exist_ok=True)
 
@@ -888,6 +926,27 @@ async def _process_asset_inner(account_id: str, asset_id: str) -> str:
                 log.warning("Filename collision in incoming/: %s -> %s", filename, dest.name)
             tmp.replace(dest)  # rename → sorter sees moved_to
             log.info("Published %s", dest.name)
+
+            # Structural check for RAW files BEFORE the upstream delete. If
+            # exiftool finds IFD warnings (the Adobe-strict, exiftool-lenient
+            # case), keep the Frame.io copy so the user can recover from the
+            # UI trash, and alert. The sorter's own check still fires as a
+            # secondary signal once the file lands in sorted/.
+            if _is_raw(dest.name):
+                warn = await _validate_raw_structure(dest)
+                if warn:
+                    snippet = warn.replace("\n", "; ")[:300]
+                    log.warning(
+                        "Structural warnings in %s — upstream NOT deleted: %s",
+                        dest.name, snippet,
+                    )
+                    await notify_failure(
+                        "raw_validation_warning",
+                        f"{dest.name}: structural warnings detected; "
+                        f"Frame.io copy kept for recovery. {snippet}",
+                        throttle_minutes=5,
+                    )
+                    return "kept_upstream_for_recovery"
 
             # Delete upstream to keep Frame.io free tier clear
             log.info("Deleting asset %s from Frame.io", asset_id)
