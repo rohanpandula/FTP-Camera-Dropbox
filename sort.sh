@@ -113,24 +113,19 @@ wait_stable() {
 }
 
 validate_file() {
-  local f=$1 type=$2 size head tail warn
+  local f=$1 type=$2 size head tail
   size=$(stat -c %s "$f" 2>/dev/null) || { log "validate: stat failed"; return 1; }
   case "$type" in
     raw)
       (( size > 5000000 )) || { log "validate: raw too small ($size B)"; return 1; }
       exiftool -Make -Model -s3 "$f" 2>/dev/null | grep -q . || { log "validate: raw exif unreadable"; return 1; }
-      # Soft structural check — catches RAFs whose internal IFD is malformed
-      # (overlapping tag values, broken offsets). exiftool is permissive and
-      # still reads basic metadata, but Adobe Camera Raw / Lightroom refuse to
-      # load such files. We don't quarantine (the bytes are what they are; the
-      # user usually wants the file anyway to try DNG conversion / salvage),
-      # but we fire a Telegram heads-up so they notice within minutes instead
-      # of weeks later in LR.
-      warn=$(exiftool -validate -warning -a -s3 "$f" 2>/dev/null | head -3 | tr '\n' ';')
-      if [[ -n "$warn" ]]; then
-        log "validate WARN: $(basename "$f") — $warn"
-        telegram_send "⚠️ $(basename "$f"): structural warnings, may not open in Lightroom/RAW apps. $warn"
-      fi
+      # Note: I tried adding `exiftool -validate -warning` here to catch RAFs
+      # that LR refuses to import, but Fuji firmware emits benign IFD-overlap
+      # warnings on every file (e.g. VignettingParams overlaps
+      # ChromaticAberrationParams), so the check produced 100% false positives.
+      # exiftool can't see the actual RAW pixel data, which is where the real
+      # corruption sits. Removed in favour of "no check" until a better signal
+      # exists (probably needs dcraw/LibRaw to actually decode the RAW).
       ;;
     jpg)
       (( size > 50000 )) || { log "validate: jpg too small ($size B)"; return 1; }
