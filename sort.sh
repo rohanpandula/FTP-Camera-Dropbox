@@ -10,6 +10,7 @@ INCOMING="${INCOMING:-/data/incoming}"
 SORTED="${SORTED:-/data/sorted}"
 QUARANTINE="${QUARANTINE:-/data/quarantine}"
 NOTIFY_QUEUE="${INCOMING}/../.notify-queue.tsv"
+QUAR_QUEUE="${INCOMING}/../.quarantine-queue.tsv"
 NOTIFY_LOCK="${INCOMING}/../.notify-queue.lock"
 TG_CONFIG="${TG_CONFIG:-/etc/telegram.json}"
 RECONCILE_IDLE="${RECONCILE_IDLE:-300}"
@@ -341,10 +342,48 @@ flush_notify() {
   fi
 }
 
+# Quarantines get their own batched alert. Usually a quarantined file is a
+# partial from an aborted FTP transfer and the camera re-sends a good copy
+# minutes later — the message says so, so a ping isn't a panic. A name that
+# never shows up in a later "uploaded" batch is the one to go pull from card.
+enqueue_quar() {
+  local basename reason
+  basename=$(sanitize "$1"); reason=$(sanitize "$2")
+  {
+    flock -x 200
+    printf '%s\t%s\t%s\n' "$(date '+%H:%M:%S')" "$basename" "$reason" >> "$QUAR_QUEUE"
+  } 200>"$NOTIFY_LOCK"
+}
+
+flush_quar() {
+  [[ -s "$QUAR_QUEUE" ]] || return 0
+  local rotated="${QUAR_QUEUE}.flush.$$"
+  {
+    flock -x 200
+    [[ -s "$QUAR_QUEUE" ]] || return 0
+    mv "$QUAR_QUEUE" "$rotated"
+  } 200>"$NOTIFY_LOCK"
+  [[ -f "$rotated" ]] || return 0
+
+  local total names msg
+  total=$(wc -l < "$rotated")
+  names=$(awk -F'\t' '{print "• " $2 " (" $3 ")"}' "$rotated" | head -10)
+  (( total > 10 )) && names="$names
+…and $((total-10)) more"
+  msg=$(printf "⚠️ %d file(s) quarantined:\n%s\nUsually aborted transfers — the camera normally re-sends a good copy. If a name never lands in sorted/, recover it from the SD card." "$total" "$names")
+
+  if telegram_send "$msg"; then
+    rm "$rotated"
+  else
+    mv "$rotated" "${QUAR_QUEUE}.failed.$(date +%s)"
+  fi
+}
+
 notifier_loop() {
   while true; do
     sleep "$NOTIFY_INTERVAL"
     flush_notify
+    flush_quar
   done
 }
 
@@ -373,6 +412,7 @@ process() {
         log "DUP-quar: $base matches existing — deleted incoming"
       else
         log "QUARANTINE: $base -> $date/$(basename "$MOVED_DEST")"
+        enqueue_quar "$base" "failed validation"
       fi
     fi
     return 0

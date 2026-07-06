@@ -1,0 +1,5 @@
+# FTPDropbox pipeline — installed at /boot/config/plugins/dynamix/ftpdropbox.cron
+# Nightly backup to the parity-protected array at 03:30
+30 3 * * * bash /boot/config/scripts/ftpdropbox-backup.sh &>/dev/null
+# Pipeline healthcheck every 5 minutes (alerts on state change only)
+*/5 * * * * bash /boot/config/scripts/ftpdropbox-healthcheck.sh &>/dev/null
