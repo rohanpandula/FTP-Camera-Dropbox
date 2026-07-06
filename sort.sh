@@ -15,7 +15,15 @@ TG_CONFIG="${TG_CONFIG:-/etc/telegram.json}"
 RECONCILE_IDLE="${RECONCILE_IDLE:-300}"
 STUCK_AGE_MIN="${STUCK_AGE_MIN:-60}"
 STABLE_WAIT="${STABLE_WAIT:-60}"
+STABLE_SKIP_AGE="${STABLE_SKIP_AGE:-3600}"  # skip the wait for files older than this (seconds)
 NOTIFY_INTERVAL="${NOTIFY_INTERVAL:-300}"   # 5 minutes
+RAW_MIN_BYTES_DEFAULT="${RAW_MIN_BYTES_DEFAULT:-5000000}"
+RAW_MIN_BYTES_NIKON_ZF="${RAW_MIN_BYTES_NIKON_ZF:-25000000}"
+RAW_MIN_BYTES_SONY_A7CR="${RAW_MIN_BYTES_SONY_A7CR:-40000000}"
+RAW_MIN_BYTES_GFX100="${RAW_MIN_BYTES_GFX100:-80000000}"
+RAW_FULL_VALIDATE="${RAW_FULL_VALIDATE:-1}"
+RAW_VALIDATE_TIMEOUT="${RAW_VALIDATE_TIMEOUT:-240}"
+RAW_VALIDATE_TMPDIR="${RAW_VALIDATE_TMPDIR:-${INCOMING}/../.raw-validate-tmp}"
 
 log() { echo "[$(date '+%F %T')] $*" >&2; }
 
@@ -60,6 +68,130 @@ sanitize() {
   printf '%s' "$1" | tr -d '\000-\037\177' | cut -c1-100
 }
 
+camera_model() {
+  sanitize "$(exiftool -Model -s3 "$1" 2>/dev/null | head -n1)"
+}
+
+raw_min_bytes_for() {
+  local model=$1 ext=${2,,}
+  case "$model:$ext" in
+    "NIKON Z f:nef") echo "$RAW_MIN_BYTES_NIKON_ZF" ;;
+    "ILCE-7CR:arw") echo "$RAW_MIN_BYTES_SONY_A7CR" ;;
+    "GFX100 II:raf"|"GFX100RF:raf") echo "$RAW_MIN_BYTES_GFX100" ;;
+    *) echo "$RAW_MIN_BYTES_DEFAULT" ;;
+  esac
+}
+
+truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+raw_payload_validate() {
+  local f=$1 ext=${2,,} tmp link output rc detail start_size end_size
+
+  truthy "$RAW_FULL_VALIDATE" || return 0
+
+  command -v raw-identify >/dev/null 2>&1 || {
+    log "validate: raw-identify missing while RAW_FULL_VALIDATE=${RAW_FULL_VALIDATE}"
+    return 1
+  }
+  command -v simple_dcraw >/dev/null 2>&1 || {
+    log "validate: simple_dcraw missing while RAW_FULL_VALIDATE=${RAW_FULL_VALIDATE}"
+    return 1
+  }
+
+  start_size=$(stat -c %s "$f" 2>/dev/null) || {
+    log "validate: raw disappeared before decode"
+    return 75
+  }
+
+  output=$(timeout "$RAW_VALIDATE_TIMEOUT" raw-identify "$f" 2>&1)
+  rc=$?
+  if (( rc != 0 )); then
+    detail=$(sanitize "$output")
+    [[ -n "$detail" ]] || detail="exit $rc"
+    if (( rc == 124 )); then
+      log "validate: raw-identify timed out after ${RAW_VALIDATE_TIMEOUT}s"
+    else
+      log "validate: raw-identify failed ($detail)"
+    fi
+    return 1
+  fi
+
+  mkdir -p "$RAW_VALIDATE_TMPDIR" || {
+    log "validate: cannot create raw validation temp dir"
+    return 1
+  }
+  tmp=$(mktemp -d "${RAW_VALIDATE_TMPDIR%/}/raw.XXXXXX") || {
+    log "validate: cannot allocate raw validation temp dir"
+    return 1
+  }
+
+  # simple_dcraw writes a large PPM next to the input. Use a symlink in a temp
+  # dir on /data so validation output never lands in incoming or Docker overlay.
+  link="$tmp/input.${ext}"
+  if ! ln -s "$f" "$link"; then
+    rm -rf "$tmp"
+    log "validate: cannot stage raw validation input"
+    return 1
+  fi
+
+  output=$(cd "$tmp" && timeout "$RAW_VALIDATE_TIMEOUT" simple_dcraw -D -4 "$(basename "$link")" 2>&1)
+  rc=$?
+  rm -rf "$tmp"
+
+  end_size=$(stat -c %s "$f" 2>/dev/null) || {
+    log "validate: raw disappeared during decode"
+    return 75
+  }
+  if [[ "$start_size" != "$end_size" ]]; then
+    log "validate: raw changed during decode ($start_size B -> $end_size B)"
+    return 75
+  fi
+
+  if (( rc != 0 )); then
+    detail=$(sanitize "$output")
+    [[ -n "$detail" ]] || detail="exit $rc"
+    if (( rc == 124 )); then
+      log "validate: raw decode timed out after ${RAW_VALIDATE_TIMEOUT}s"
+    else
+      log "validate: raw decode failed ($detail)"
+    fi
+    return 1
+  fi
+
+  return 0
+}
+
+raw_container_validate() {
+  local f=$1 output rc severe
+
+  output=$(timeout "$RAW_VALIDATE_TIMEOUT" exiftool -validate -warning -error -a "$f" 2>&1)
+  rc=$?
+  if (( rc == 124 )); then
+    log "validate: raw container check timed out after ${RAW_VALIDATE_TIMEOUT}s"
+    return 1
+  fi
+
+  severe=$(printf '%s\n' "$output" \
+    | grep -Ei 'runs past end of file|unexpected end of file|truncated|file format error|corrupt|error reading|bad offset|invalid offset' \
+    | head -n1 || true)
+  if [[ -n "$severe" ]]; then
+    log "validate: raw container failed ($(sanitize "$severe"))"
+    return 1
+  fi
+
+  if (( rc != 0 )); then
+    log "validate: raw container check failed ($(sanitize "$output"))"
+    return 1
+  fi
+
+  return 0
+}
+
 get_date() {
   local f=$1 d
   d=$(exiftool -d '%Y-%m-%d' -DateTimeOriginal -CreateDate -ModifyDate -s3 "$f" 2>/dev/null | head -n1)
@@ -99,12 +231,16 @@ get_camera() {
 wait_stable() {
   local f=$1 a b now mtime
   a=$(stat -c %s "$f" 2>/dev/null) || return 1
-  # Fast path: if the file hasn't been written in STABLE_WAIT seconds it's
-  # already settled (draining a backlog, or a finished/paused upload) — no point
-  # sleeping. Fresh uploads (recent mtime) still get the full wait to outlast
-  # camera retry storms; validate_file() remains the backstop for truncation.
+  # Skip the wait only for files whose mtime is over STABLE_SKIP_AGE old (1h
+  # default). Why 1h is safe where the old 60s skip wasn't: pure-ftpd aborts
+  # stalled transfers at ~15 min (observed 451 Timeouts on 2.4 GHz uploads),
+  # and camera retries land within minutes — no FTP writer can exist behind an
+  # hour-old mtime. Bulk SMB drops of already-shot photos (Finder preserves
+  # mtimes) drain at seconds/file instead of STABLE_WAIT/file. Anything with a
+  # fresh mtime still pays the full double-stat wait, and the LibRaw unpack in
+  # validate_file remains the backstop for truncated RAWs.
   now=$(date +%s); mtime=$(stat -c %Y "$f" 2>/dev/null || echo "$now")
-  if (( now - mtime >= STABLE_WAIT )); then
+  if (( now - mtime >= STABLE_SKIP_AGE )); then
     return 0
   fi
   sleep "$STABLE_WAIT"
@@ -113,19 +249,20 @@ wait_stable() {
 }
 
 validate_file() {
-  local f=$1 type=$2 size head tail
+  local f=$1 type=$2 size head tail ext model min_size
   size=$(stat -c %s "$f" 2>/dev/null) || { log "validate: stat failed"; return 1; }
   case "$type" in
     raw)
-      (( size > 5000000 )) || { log "validate: raw too small ($size B)"; return 1; }
+      ext="${f##*.}"
+      model=$(camera_model "$f")
+      min_size=$(raw_min_bytes_for "$model" "$ext")
+      (( size >= min_size )) || {
+        log "validate: raw too small for ${model:-Unknown} ($size B < $min_size B)"
+        return 1
+      }
       exiftool -Make -Model -s3 "$f" 2>/dev/null | grep -q . || { log "validate: raw exif unreadable"; return 1; }
-      # Note: I tried adding `exiftool -validate -warning` here to catch RAFs
-      # that LR refuses to import, but Fuji firmware emits benign IFD-overlap
-      # warnings on every file (e.g. VignettingParams overlaps
-      # ChromaticAberrationParams), so the check produced 100% false positives.
-      # exiftool can't see the actual RAW pixel data, which is where the real
-      # corruption sits. Removed in favour of "no check" until a better signal
-      # exists (probably needs dcraw/LibRaw to actually decode the RAW).
+      raw_container_validate "$f" || return 1
+      raw_payload_validate "$f" "${ext,,}" || return $?
       ;;
     jpg)
       (( size > 50000 )) || { log "validate: jpg too small ($size B)"; return 1; }
@@ -223,7 +360,14 @@ process() {
   local type; type=$(get_type "$ext")
   local date; date=$(get_date "$f")
 
-  if ! validate_file "$f" "$type"; then
+  if validate_file "$f" "$type"; then
+    :
+  else
+    local validation_rc=$?
+    if (( validation_rc == 75 )); then
+      log "skip unstable: $base changed during validation"
+      return 0
+    fi
     if move_with_suffix "$f" "$QUARANTINE/$date" "$base" "$name" "$ext"; then
       if (( DEDUP_HIT )); then
         log "DUP-quar: $base matches existing — deleted incoming"
@@ -270,9 +414,9 @@ fi
 # Background notifier
 notifier_loop &
 NOTIFIER_PID=$!
-trap "kill $NOTIFIER_PID 2>/dev/null; exit" SIGTERM SIGINT
+trap 'kill "$NOTIFIER_PID" 2>/dev/null; exit' SIGTERM SIGINT
 
-log "watching $INCOMING (stable_wait=${STABLE_WAIT}s, dedup=xxhash, notify=${NOTIFY_INTERVAL}s)"
+log "watching $INCOMING (stable_wait=${STABLE_WAIT}s, raw_full_validate=${RAW_FULL_VALIDATE}, dedup=xxhash, notify=${NOTIFY_INTERVAL}s)"
 exec 3< <(inotifywait -m -q -e close_write -e moved_to --format '%w%f' "$INCOMING")
 while true; do
   if IFS= read -t "$RECONCILE_IDLE" -u 3 -r f; then

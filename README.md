@@ -12,7 +12,7 @@ This is a Lightroom-style auto-import folder that runs on your own hardware, wit
 
 - Auto-sorts by EXIF `DateTimeOriginal` → `YYYY-MM-DD/raw|jpg|video/filename`
 - Falls back to file mtime when the EXIF date is missing or suspicious
-- Content validation: RAW size floor, JPEG SOI/EOI byte checks, video readability
+- Content validation: RAW size floor + severe ExifTool EOF checks + LibRaw unpack check, JPEG SOI/EOI byte checks, video readability
 - Deduplication via xxhash, but only on filename collision, so unique files cost nothing
 - Quarantine folder for files that fail validation (truncated uploads, corrupted transfers)
 - Handles camera retry storms: `wait_stable` holds until the file size is unchanged for 60 seconds
@@ -77,8 +77,11 @@ All settings have sensible defaults. Override via `.env` or environment variable
 | `FTP_USER` | `cameras` | FTP username |
 | `FTP_PASS` | `cameras` | FTP password |
 | `PUBLICHOST` | `127.0.0.1` | IP advertised to clients in PASV mode. Set this to your host LAN IP. |
-| `STABLE_WAIT` | `60` | Seconds to wait for a *fresh* file's size to stabilize before processing. Files whose mtime is already older than this (backlog drain, finished uploads) skip the wait. |
+| `STABLE_WAIT` | `60` | Seconds to wait for file size to remain unchanged before processing. |
 | `NOTIFY_INTERVAL` | `300` | How often to flush the Telegram notification queue (seconds) |
+| `RAW_FULL_VALIDATE` | `1` | Run severe ExifTool EOF/corruption checks plus `raw-identify` and `simple_dcraw -D -4` before sorting RAW files. This catches truncated RAW payloads that still have readable EXIF. |
+| `RAW_VALIDATE_TIMEOUT` | `240` | Per-command timeout, in seconds, for RAW validation. |
+| `RAW_VALIDATE_TMPDIR` | `/data/.raw-validate-tmp` | Temporary directory for LibRaw validation output. Full RAW unpack writes large PPMs here and deletes them after each check. |
 | `INCOMING` | `/data/incoming` | Directory FTP drops files into |
 | `SORTED` | `/data/sorted` | Destination for successfully sorted files |
 | `QUARANTINE` | `/data/quarantine` | Destination for files that fail validation |
@@ -141,7 +144,9 @@ These are the things that cost real time to figure out.
 
 **Wi-Fi band makes an enormous difference. 2.4 GHz vs 5 GHz is not a "nice to have."** Numbers from real testing, same Fuji body, same room: 2.4 GHz at full bars was about 22 KB/s. 5 GHz from far across the house was about 80 KB/s. 5 GHz close to the access point was 600–1500 KB/s. A 100 MB RAF file takes 80 minutes on 2.4 GHz and roughly 1 minute on 5 GHz. It's not even close. Most Fuji X-bodies are 2.4 GHz only (X-T4 and earlier, the X-S series); the X-T5, X-H2, X-H2S, and GFX 100 II added 5 GHz. Signal strength matters too: a body in the same room as the AP beats one with "full bars" on a distant 2.4 GHz radio by 10×.
 
-**`wait_stable` needs to be ~60 seconds, not 2 seconds.** The obvious implementation is to wait until the file stops growing, then process it, and the obvious choice for "wait" is 2 seconds. That's wrong on flaky links. Cameras retry uploads on failure, and during a retry the file in `incoming/` can go quiet for several seconds while the camera reconnects and resumes. A 2-second check declares a partial file "stable" mid-retry and sorts a truncated image. 60 seconds outlasts the camera's retry intervals without being annoying, and validation catches anything that still slips through. (Files already older than `STABLE_WAIT` skip the wait, so draining a backlog doesn't crawl.)
+**`wait_stable` needs to be ~60 seconds, not 2 seconds.** The obvious implementation is to wait until the file stops growing, then process it, and the obvious choice for "wait" is 2 seconds. That's wrong on flaky links. Cameras retry uploads on failure, and during a retry the file in `incoming/` can go quiet for several seconds while the camera reconnects and resumes. A 2-second check declares a partial file "stable" mid-retry and sorts a truncated image. 60 seconds outlasts the camera's retry intervals without being annoying, and validation catches anything that still slips through. The sorter always waits once, including during startup backlog drains, because mtime alone was not a reliable signal for paused camera uploads.
+
+**Readable EXIF does not mean a RAW is intact.** A truncated RAW can still have valid camera/date metadata near the front of the file while the image payload ends early. RAW sorting therefore fails files with severe ExifTool EOF/corruption warnings, then runs `raw-identify` plus a full LibRaw unpack with `simple_dcraw -D -4` before moving the file to `sorted/`. This is slower and writes a large temporary PPM under `/data/.raw-validate-tmp`, but it catches the "end of file" class of corruption before the file is blessed.
 
 **A custom Alpine image beats fighting stilliard/pure-ftpd's anonymous mode.** Anonymous FTP (no username/password) is what you'd want ideally, so it's what I tried first. The stilliard/pure-ftpd image's anonymous mode has papercuts with Fuji firmware: some bodies insist on sending credentials even in "anonymous" mode, and the mismatch fails silently. A trivial `cameras`/`cameras` virtual user sidesteps all of it, and every camera firmware I tested accepts it. On a LAN with no internet exposure it's effectively zero-auth anyway.
 
@@ -180,7 +185,7 @@ Camera (Wi-Fi FTP)
     wait_stable()          -- wait 60s for file size to stop changing
     get_type()             -- by extension
     get_date()             -- EXIF DateTimeOriginal, fallback to mtime
-    validate_file()        -- size floors, JPEG byte checks, exif readability
+    validate_file()        -- size floors, RAW EOF/LibRaw checks, JPEG byte checks
     move_with_suffix()     -- dedup check, then mv
        |
        |-- ok     --> /data/sorted/YYYY-MM-DD/{raw,jpg,video}/filename

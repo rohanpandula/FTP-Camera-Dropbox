@@ -30,6 +30,9 @@ services:
       QUARANTINE: /data/quarantine
       STABLE_WAIT: ${STABLE_WAIT:-60}
       NOTIFY_INTERVAL: ${NOTIFY_INTERVAL:-300}
+      RAW_FULL_VALIDATE: ${RAW_FULL_VALIDATE:-1}
+      RAW_VALIDATE_TIMEOUT: ${RAW_VALIDATE_TIMEOUT:-240}
+      RAW_VALIDATE_TMPDIR: /data/.raw-validate-tmp
       TG_CONFIG: /etc/telegram.json
     volumes:
       # Must match whichever option you chose above for `ftp`:
