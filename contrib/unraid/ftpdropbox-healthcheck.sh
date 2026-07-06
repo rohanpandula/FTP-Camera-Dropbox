@@ -36,11 +36,14 @@ else
       restarting)
         add "$c is crash-looping — check: docker logs $c" ;;
       exited)
+        # Self-heal: an exited pipeline container should simply be running.
+        # Unraid GUI reboots don't reliably honor Docker restart policies for
+        # CLI-created containers, so start it ourselves and say what happened.
         rc=$(docker inspect "$c" --format '{{.State.ExitCode}}' 2>/dev/null)
-        if [ "$rc" = "137" ]; then
-          add "$c exited 137 (killed) — likely a reboot/shutdown and its restart policy did not bring it back: docker start $c"
+        if docker start "$c" >/dev/null 2>&1; then
+          add "$c was down (exit rc=$rc, likely reboot) — auto-restarted OK"
         else
-          add "$c exited rc=$rc — check: docker logs $c"
+          add "$c exited rc=$rc and auto-restart FAILED — check: docker logs $c"
         fi ;;
       "")
         add "$c container does not exist — deleted or renamed?" ;;
