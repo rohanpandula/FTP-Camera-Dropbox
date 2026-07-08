@@ -52,17 +52,31 @@ else
     esac
   done
 
+  # Seconds since a container started. Used to skip readiness probes on a
+  # just-started container: right after a reboot the container is "running"
+  # before the daemon inside it has bound its port / opened its socket, which
+  # would otherwise fire a false "nothing listens" alert on every boot.
+  uptime_secs() {
+    local started; started=$(docker inspect "$1" --format '{{.State.StartedAt}}' 2>/dev/null)
+    [ -z "$started" ] && { echo 0; return; }
+    local s; s=$(date -d "$started" +%s 2>/dev/null) || { echo 999999; return; }
+    echo $(( $(date +%s) - s ))
+  }
+  GRACE=90  # let a freshly-started container's services come up before probing
+
   # --- FTP actually listening (probe inside the container: macvlan means the
   # host cannot reach the container IP, so exec is the reliable path). Read
   # /proc/net/tcp directly — the image has no netstat/ss. Port 21 = 0015 hex. ---
-  if [ "$(docker inspect pure-ftpd --format '{{.State.Status}}' 2>/dev/null)" = "running" ]; then
+  if [ "$(docker inspect pure-ftpd --format '{{.State.Status}}' 2>/dev/null)" = "running" ] \
+     && [ "$(uptime_secs pure-ftpd)" -gt "$GRACE" ]; then
     if ! docker exec pure-ftpd sh -c "grep -q ':0015 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null"; then
       add "pure-ftpd runs but nothing listens on :21 — config or crashed daemon inside container"
     fi
   fi
 
   # --- Mirror answering its own health endpoint ---
-  if [ "$(docker inspect frameio-mirror --format '{{.State.Status}}' 2>/dev/null)" = "running" ]; then
+  if [ "$(docker inspect frameio-mirror --format '{{.State.Status}}' 2>/dev/null)" = "running" ] \
+     && [ "$(uptime_secs frameio-mirror)" -gt "$GRACE" ]; then
     if ! docker exec frameio-mirror python3 -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)" 2>/dev/null; then
       add "frameio-mirror runs but /health does not answer — app wedged; docker restart frameio-mirror"
     fi
