@@ -3,3 +3,5 @@
 30 3 * * * bash /boot/config/scripts/ftpdropbox-backup.sh &>/dev/null
 # Pipeline healthcheck every 5 minutes (alerts on state change only)
 */5 * * * * bash /boot/config/scripts/ftpdropbox-healthcheck.sh &>/dev/null
+# Auto-heal wrong-ownership drops in incoming every 2 minutes (silent unless it fixes something)
+*/2 * * * * bash /boot/config/scripts/ftpdropbox-fixperms.sh &>/dev/null
