@@ -11,6 +11,7 @@ SORTED="${SORTED:-/data/sorted}"
 QUARANTINE="${QUARANTINE:-/data/quarantine}"
 NOTIFY_QUEUE="${INCOMING}/../.notify-queue.tsv"
 QUAR_QUEUE="${INCOMING}/../.quarantine-queue.tsv"
+PERM_QUEUE="${INCOMING}/../.perm-queue.tsv"
 NOTIFY_LOCK="${INCOMING}/../.notify-queue.lock"
 TG_CONFIG="${TG_CONFIG:-/etc/telegram.json}"
 RECONCILE_IDLE="${RECONCILE_IDLE:-300}"
@@ -379,11 +380,51 @@ flush_quar() {
   fi
 }
 
+# Permission-problem queue. Separate from quarantine because the file is NOT
+# bad — it's just unreadable by our UID and sitting in incoming. Dedup by
+# filename (enqueue_perm returns 1 if already queued) so a file that survives
+# multiple reconcile passes only logs/alerts once per flush window.
+enqueue_perm() {
+  local basename; basename=$(sanitize "$1")
+  {
+    flock -x 200
+    if grep -qxF "$basename" "$PERM_QUEUE" 2>/dev/null; then
+      return 1
+    fi
+    printf '%s\n' "$basename" >> "$PERM_QUEUE"
+  } 200>"$NOTIFY_LOCK"
+}
+
+flush_perm() {
+  [[ -s "$PERM_QUEUE" ]] || return 0
+  local rotated="${PERM_QUEUE}.flush.$$"
+  {
+    flock -x 200
+    [[ -s "$PERM_QUEUE" ]] || return 0
+    mv "$PERM_QUEUE" "$rotated"
+  } 200>"$NOTIFY_LOCK"
+  [[ -f "$rotated" ]] || return 0
+
+  local total names msg
+  total=$(wc -l < "$rotated")
+  names=$(sed 's/^/• /' "$rotated" | head -8)
+  (( total > 8 )) && names="$names
+…and $((total-8)) more"
+  msg=$(printf "🔒 %d file(s) in incoming are UNREADABLE (wrong ownership, not corrupt):\n%s\nThey are safe but won't sort until fixed. On the Tower run:\nchown -R 99:100 /mnt/nvmenetworkstorage/FTPDropbox/incoming" "$total" "$names")
+
+  if telegram_send "$msg"; then
+    rm "$rotated"
+  else
+    mv "$rotated" "${PERM_QUEUE}.failed.$(date +%s)"
+  fi
+}
+
 notifier_loop() {
   while true; do
     sleep "$NOTIFY_INTERVAL"
     flush_notify
     flush_quar
+    flush_perm
   done
 }
 
@@ -393,6 +434,18 @@ process() {
   [[ -f "$f" ]] || return 0
   local base; base=$(basename "$f")
   case "$base" in .*|*.tmp|*.part|*.filepart|Thumbs.db) return 0 ;; esac
+  # Readability guard: a file dropped in via SMB/scp as another UID with
+  # owner-only perms (e.g. 700 502:games) is invisible to our UID. Without
+  # this check every unreadable file fails EXIF validation and gets
+  # quarantined as "corrupt" — mixing perfectly good files into quarantine.
+  # Instead, leave it in incoming and raise a distinct, throttled alert so the
+  # user fixes ownership (chown -R 99:100). The stuck-file scan keeps it visible.
+  if [[ ! -r "$f" ]]; then
+    if enqueue_perm "$base"; then
+      log "UNREADABLE (permissions): $base — left in incoming, needs chown to 99:100"
+    fi
+    return 0
+  fi
   wait_stable "$f" || { log "skip unstable: $base"; return 0; }
 
   local ext="${base##*.}" name="${base%.*}"
@@ -430,11 +483,21 @@ process() {
   fi
 }
 
+# Remove empty subdirectories left behind after files are sorted out of a
+# dropped folder tree. mindepth 1 guarantees INCOMING itself is never removed.
+prune_empty_dirs() {
+  find "$INCOMING" -mindepth 1 -type d -empty -delete 2>/dev/null
+}
+
 reconcile() {
   log "reconcile scan"
+  # -type f recurses the whole tree: a true dropbox processes files at any depth,
+  # not just the top level. process() handles arbitrary source paths (spaces,
+  # colons, nested dirs) — it sorts by EXIF date regardless of folder layout.
   find "$INCOMING" -type f -print0 2>/dev/null | while IFS= read -r -d '' f; do
     process "$f"
   done
+  prune_empty_dirs
   find "$INCOMING" -type f -mmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
     log "STUCK >${STUCK_AGE_MIN}min: $(basename "$f")"
   done
@@ -457,10 +520,26 @@ NOTIFIER_PID=$!
 trap 'kill "$NOTIFIER_PID" 2>/dev/null; exit' SIGTERM SIGINT
 
 log "watching $INCOMING (stable_wait=${STABLE_WAIT}s, raw_full_validate=${RAW_FULL_VALIDATE}, dedup=xxhash, notify=${NOTIFY_INTERVAL}s)"
-exec 3< <(inotifywait -m -q -e close_write -e moved_to --format '%w%f' "$INCOMING")
+# -r watches the whole tree, so files dropped into subfolders fire live events
+# too. inotifywait auto-adds watches on new subdirectories as they appear.
+# SORTED/QUARANTINE/tmp all live OUTSIDE incoming (siblings under /data), so the
+# recursive watch never sees our own output — no feedback loop.
+exec 3< <(inotifywait -m -r -q -e close_write -e moved_to --format '%w%f' "$INCOMING")
 while true; do
   if IFS= read -t "$RECONCILE_IDLE" -u 3 -r f; then
-    process "$f"
+    if [[ -d "$f" ]]; then
+      # A whole folder was moved/created in one operation — inotify reports the
+      # directory, not the files already inside it. Sweep its contents now
+      # instead of waiting for the next reconcile.
+      find "$f" -type f -print0 2>/dev/null | while IFS= read -r -d '' sub; do
+        process "$sub"
+      done
+      prune_empty_dirs
+    else
+      process "$f"
+      # If that file was the last one in a dropped subfolder, tidy the empties.
+      case "$f" in "$INCOMING"/*/*) prune_empty_dirs ;; esac
+    fi
   else
     reconcile
   fi
