@@ -251,7 +251,7 @@ wait_stable() {
 }
 
 validate_file() {
-  local f=$1 type=$2 size head tail ext model min_size
+  local f=$1 type=$2 size head tail ext model min_size vmeta
   size=$(stat -c %s "$f" 2>/dev/null) || { log "validate: stat failed"; return 1; }
   case "$type" in
     raw)
@@ -276,6 +276,22 @@ validate_file() {
     video)
       (( size > 500000 )) || { log "validate: video too small ($size B)"; return 1; }
       exiftool -FileType -s3 "$f" 2>/dev/null | grep -q . || { log "validate: video unreadable"; return 1; }
+      # FileType reads the ftyp box at the FRONT of the file, so a truncated
+      # upload still passes it. Camera QuickTime variants (Sony XAVC-S MP4,
+      # Fuji MOV) write the moov index at the END, so a cut-off transfer has
+      # no Duration and exiftool flags truncated mdat. Require an intact tail
+      # before blessing — same idea as the RAW EOF checks.
+      vmeta=$(exiftool -S -Duration -Warning -api largefilesupport=1 "$f" 2>/dev/null)
+      if grep -qi 'truncated' <<<"$vmeta"; then
+        log "validate: video truncated ($(grep -im1 '^Warning' <<<"$vmeta"))"
+        return 1
+      fi
+      ext="${f##*.}"
+      case "${ext,,}" in
+        mp4|mov|m4v)
+          grep -q '^Duration' <<<"$vmeta" || { log "validate: video missing Duration (no moov atom — truncated upload?)"; return 1; }
+          ;;
+      esac
       ;;
     other) ;;
   esac

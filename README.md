@@ -12,7 +12,7 @@ This is a Lightroom-style auto-import folder that runs on your own hardware, wit
 
 - Auto-sorts by EXIF `DateTimeOriginal` → `YYYY-MM-DD/raw|jpg|video/filename`
 - Falls back to file mtime when the EXIF date is missing or suspicious
-- Content validation: RAW size floor + severe ExifTool EOF checks + LibRaw unpack check, JPEG SOI/EOI byte checks, video readability
+- Content validation: RAW size floor + severe ExifTool EOF checks + LibRaw unpack check, JPEG SOI/EOI byte checks, video moov/Duration truncation checks
 - Deduplication via xxhash, but only on filename collision, so unique files cost nothing
 - Quarantine folder for files that fail validation (truncated uploads, corrupted transfers)
 - Handles camera retry storms: `wait_stable` holds until the file size is unchanged for 60 seconds
@@ -148,6 +148,8 @@ These are the things that cost real time to figure out.
 
 **Readable EXIF does not mean a RAW is intact.** A truncated RAW can still have valid camera/date metadata near the front of the file while the image payload ends early. RAW sorting therefore fails files with severe ExifTool EOF/corruption warnings, then runs `raw-identify` plus a full LibRaw unpack with `simple_dcraw -D -4` before moving the file to `sorted/`. This is slower and writes a large temporary PPM under `/data/.raw-validate-tmp`, but it catches the "end of file" class of corruption before the file is blessed.
 
+**A readable file type does not mean a video is intact.** The MP4 `ftyp` header sits at the front of the file, but camera QuickTime variants (Sony XAVC-S, Fuji MOV) write the `moov` index at the end, after the media data. So a transfer that dies partway leaves a file that still identifies as a perfectly good MP4 to a header check. Worse, each camera retry dies at a different byte count, so the size-differs dedup rule renames every truncated attempt into the library as `_2`, `_3`, `_4` "copies" instead of flagging them. Validation therefore requires an intact tail: any ExifTool "Truncated" warning fails the file, and MP4/MOV/M4V must yield a `Duration` (no `moov`, no blessing) — the video equivalent of the RAW EOF checks.
+
 **A custom Alpine image beats fighting stilliard/pure-ftpd's anonymous mode.** Anonymous FTP (no username/password) is what you'd want ideally, so it's what I tried first. The stilliard/pure-ftpd image's anonymous mode has papercuts with Fuji firmware: some bodies insist on sending credentials even in "anonymous" mode, and the mismatch fails silently. A trivial `cameras`/`cameras` virtual user sidesteps all of it, and every camera firmware I tested accepts it. On a LAN with no internet exposure it's effectively zero-auth anyway.
 
 **macvlan / br0 host-isolation is a red herring on Unraid.** If you assign each container a dedicated IP on br0, the Unraid host itself can't ping or connect to its own containers (`Destination Host Unreachable`). That's a Linux kernel rule about macvlan interfaces, not a bug in your FTP setup: the host and its macvlan children can't talk directly. Other devices on your LAN (including cameras) reach the containers fine. I spent a while convinced the FTP server was broken when it was just the host's network view that was isolated.
@@ -185,7 +187,7 @@ Camera (Wi-Fi FTP)
     wait_stable()          -- wait 60s for file size to stop changing
     get_type()             -- by extension
     get_date()             -- EXIF DateTimeOriginal, fallback to mtime
-    validate_file()        -- size floors, RAW EOF/LibRaw checks, JPEG byte checks
+    validate_file()        -- size floors, RAW EOF/LibRaw checks, JPEG/video structure checks
     move_with_suffix()     -- dedup check, then mv
        |
        |-- ok     --> /data/sorted/YYYY-MM-DD/{raw,jpg,video}/filename
