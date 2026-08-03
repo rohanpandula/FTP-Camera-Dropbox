@@ -404,6 +404,7 @@ services:
     build: ./frameio-mirror
     container_name: frameio-mirror
     profiles: ["frameio"]
+    user: "${PUID:-99}:${PGID:-100}"
     environment:
       INCOMING_DIR: /data/incoming
       # FRAMEIO_WEBHOOK_SECRET is REQUIRED for any public deployment — the service
@@ -415,13 +416,33 @@ services:
       ADOBE_CLIENT_SECRET: ${ADOBE_CLIENT_SECRET:-}
       # offline_access is REQUIRED for the OAuth Web App refresh-token flow.
       ADOBE_SCOPES: ${ADOBE_SCOPES:-openid,AdobeID,additional_info.roles,offline_access,profile,email}
-      # Optional: gate /oauth/start on a shared secret (?setup=...) for public endpoints.
+      # Required for OAuth Web App enrollment: send it only in X-Setup-Secret
+      # to POST /oauth/start so it never appears in browser/access URLs.
       OAUTH_SETUP_SECRET: ${OAUTH_SETUP_SECRET:-}
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-}
+      # Safe default: keep Frame.io as a second copy. Set to 1 only if deleting
+      # after exact size and SHA-256 revalidation is the intended quota policy.
+      DELETE_UPSTREAM: ${DELETE_UPSTREAM:-0}
+      WEBHOOK_MAX_BYTES: ${WEBHOOK_MAX_BYTES:-1000000}
+      FRAMEIO_WORKERS: ${FRAMEIO_WORKERS:-4}
+      FRAMEIO_QUEUE_SIZE: ${FRAMEIO_QUEUE_SIZE:-256}
+      DOWNLOAD_MAX_BYTES: ${DOWNLOAD_MAX_BYTES:-21474836480}
+      DOWNLOAD_MAX_SECONDS: ${DOWNLOAD_MAX_SECONDS:-1800}
+      RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-900}
+      RECONCILE_MAX_PAGES: ${RECONCILE_MAX_PAGES:-1000}
+      RECONCILE_MAX_ITEMS: ${RECONCILE_MAX_ITEMS:-100000}
+      RECONCILE_MAX_SECONDS: ${RECONCILE_MAX_SECONDS:-300}
+      DOWNLOAD_TMP_STALE_SECONDS: ${DOWNLOAD_TMP_STALE_SECONDS:-3600}
+      FRAMEIO_C2C_FOLDER_ID: ${FRAMEIO_C2C_FOLDER_ID:-}
+      FRAMEIO_C2C_ACCOUNT_ID: ${FRAMEIO_C2C_ACCOUNT_ID:-}
+      # Compose supplies a private persistent state volume for OAuth refresh
+      # tokens, staging, and auto-discovered reconciliation IDs.
+      REFRESH_TOKEN_FILE: ${REFRESH_TOKEN_FILE:-/var/lib/frameio/state.json}
+      STAGING_DIR: /var/lib/frameio/staging
     volumes:
       # Same volume as ftp+sorter — downloads land where the sorter is watching:
-      - camera_data:/data
-      # - ${DATA_DIR:-./data}:/data
+      - ${CAMERA_DATA_SOURCE:-camera_data}:/data
+      - frameio_state:/var/lib/frameio
       #
       # Optional: mount a frameio.json instead of using env vars (same pattern
       # as telegram.json). Env vars take precedence if both are set.
@@ -432,9 +453,9 @@ services:
       # missing Adobe creds). Plus a 🟢 startup ping each time it boots.
       # - ./telegram.json:/etc/telegram.json:ro
       #
-      # Optional: writable file for OAuth Web App refresh-token persistence.
-      # Create as `echo "{}" > oauth-state.json && chmod 600 oauth-state.json`
-      # before first start, then mount it RW (not :ro).
+      # The frameio_state volume above is the persistent default. To use a
+      # host file instead, set REFRESH_TOKEN_FILE=/etc/frameio-oauth-state.json,
+      # create/chown/chmod that file first, and mount it RW (not :ro):
       # - ./oauth-state.json:/etc/frameio-oauth-state.json
     ports:
       # Bind to localhost only — expose publicly via a reverse proxy / tunnel
@@ -444,6 +465,11 @@ services:
       - "127.0.0.1:8000:8000"
     networks:
       - camera_net
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+      frameio-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     # Internet-facing service — drop all caps (it only needs outbound HTTPS +
     # file writes via volume perms) and block privilege escalation.
