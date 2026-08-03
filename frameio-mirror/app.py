@@ -46,6 +46,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Request URLs can contain credentials in their path (notably Telegram bot
+# tokens), so transport libraries must never inherit the application's INFO
+# level. Application-owned logs record the useful outcome without the secret.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("frameio-mirror")
 
 # Group-writable output so downloaded files land as nobody:users 664 and are

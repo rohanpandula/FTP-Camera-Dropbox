@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import stat
 import tempfile
@@ -153,6 +154,14 @@ class RotatingTokenClient:
 
 
 class FrameioReleaseSafetyTests(unittest.IsolatedAsyncioTestCase):
+    def test_http_client_loggers_suppress_credential_bearing_urls(self):
+        self.assertGreaterEqual(
+            logging.getLogger("httpx").getEffectiveLevel(), logging.WARNING
+        )
+        self.assertGreaterEqual(
+            logging.getLogger("httpcore").getEffectiveLevel(), logging.WARNING
+        )
+
     def setUp(self):
         self.original_cfg = dict(app.CFG)
         self.runtime_paths = tempfile.TemporaryDirectory()
