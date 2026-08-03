@@ -1,4 +1,322 @@
 services:
+  # Named volumes are created as root:root. Prepare the shared roots and perform
+  # a state-marked directory-only ownership migration before writers start.
+  data-init:
+    image: alpine:3.24.1
+    user: "0:0"
+    environment:
+      PUID: "${PUID:-99}"
+      PGID: "${PGID:-100}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        case "$${PUID}" in ''|*[!0-9]*) echo "PUID must be numeric" >&2; exit 2 ;; esac
+        case "$${PGID}" in ''|*[!0-9]*) echo "PGID must be numeric" >&2; exit 2 ;; esac
+
+        prepare_directory() {
+          prepared_directory=$$1
+          prepared_mode=$$2
+          [ ! -L "$${prepared_directory}" ] \
+            || { echo "refusing symlink: $${prepared_directory}" >&2; return 1; }
+          mkdir -p "$${prepared_directory}"
+          [ ! -L "$${prepared_directory}" ] && [ -d "$${prepared_directory}" ] \
+            || { echo "refusing non-directory: $${prepared_directory}" >&2; return 1; }
+          prepared_identity=$$(stat -c '%d:%i' "$${prepared_directory}") \
+            || { echo "cannot identify directory: $${prepared_directory}" >&2; return 1; }
+          case "$${prepared_identity}" in
+            ''|*[!0-9:]*) echo "cannot identify directory: $${prepared_directory}" >&2; return 1 ;;
+          esac
+
+          # Pin the inode before changing metadata. A peer may rename a shared
+          # /data directory, but it cannot redirect these operations through a
+          # replacement path or symlink.
+          if ! exec 9<"$${prepared_directory}"; then
+            echo "cannot pin directory: $${prepared_directory}" >&2
+            return 1
+          fi
+          prepared_fd=/proc/$$$$/fd/9
+          prepared_fd_identity=$$(stat -Lc '%d:%i' "$${prepared_fd}") || {
+            exec 9<&-
+            echo "cannot identify pinned directory: $${prepared_directory}" >&2
+            return 1
+          }
+          if [ ! -d "$${prepared_fd}" ] \
+            || [ "$${prepared_fd_identity}" != "$${prepared_identity}" ]; then
+            exec 9<&-
+            echo "path changed while pinning directory: $${prepared_directory}" >&2
+            return 1
+          fi
+          prepared_current=$$(stat -c '%d:%i' "$${prepared_directory}" 2>/dev/null) || true
+          if [ -L "$${prepared_directory}" ] \
+            || [ "$${prepared_current}" != "$${prepared_fd_identity}" ]; then
+            exec 9<&-
+            echo "path changed before preparing directory: $${prepared_directory}" >&2
+            return 1
+          fi
+          if ! chown "$${PUID}:$${PGID}" "$${prepared_fd}" \
+            || ! chmod "$${prepared_mode}" "$${prepared_fd}"; then
+            exec 9<&-
+            echo "cannot prepare pinned directory: $${prepared_directory}" >&2
+            return 1
+          fi
+          prepared_current=$$(stat -c '%d:%i' "$${prepared_directory}" 2>/dev/null) || true
+          exec 9<&-
+          if [ -L "$${prepared_directory}" ] \
+            || [ "$${prepared_current}" != "$${prepared_fd_identity}" ]; then
+            echo "path changed during directory preparation: $${prepared_directory}" >&2
+            return 1
+          fi
+        }
+
+        migrate_nodes() {
+          migration_root=$$1
+          migration_type=$$2
+          migration_mode=$$3
+          case "$${migration_type}" in
+            d) migration_kind=directory ;;
+            f) migration_kind='regular file' ;;
+            *) echo "unsupported migration type: $${migration_type}" >&2; return 1 ;;
+          esac
+          migration_list=$$(mktemp /tmp/camera-data-init.XXXXXX)
+          find "$${migration_root}" -xdev -type "$${migration_type}" -print0 \
+            > "$${migration_list}"
+          while IFS= read -r -d '' migration_node; do
+            [ ! -L "$${migration_node}" ] \
+              || { echo "refusing symlink: $${migration_node}" >&2; return 1; }
+            case "$${migration_type}" in
+              d) [ -d "$${migration_node}" ] ;;
+              f) [ -f "$${migration_node}" ] ;;
+            esac || {
+              echo "refusing non-$${migration_kind}: $${migration_node}" >&2
+              return 1
+            }
+
+            migration_identity=$$(stat -c '%d:%i' "$${migration_node}") \
+              || { echo "cannot identify migration node: $${migration_node}" >&2; return 1; }
+            case "$${migration_identity}" in
+              ''|*[!0-9:]*) echo "cannot identify migration node: $${migration_node}" >&2; return 1 ;;
+            esac
+
+            # Hold the exact inode found above. The shared /data tree can be
+            # renamed concurrently, so all validation and mutation after this
+            # point goes through the process-owned descriptor, never the path.
+            if ! exec 9<"$${migration_node}"; then
+              echo "cannot pin migration node: $${migration_node}" >&2
+              return 1
+            fi
+            migration_fd=/proc/$$$$/fd/9
+            migration_fd_identity=$$(stat -Lc '%d:%i' "$${migration_fd}") || {
+              exec 9<&-
+              echo "cannot identify pinned migration node: $${migration_node}" >&2
+              return 1
+            }
+            case "$${migration_type}" in
+              d) [ -d "$${migration_fd}" ] ;;
+              f) [ -f "$${migration_fd}" ] ;;
+            esac || {
+              exec 9<&-
+              echo "refusing pinned non-$${migration_kind}: $${migration_node}" >&2
+              return 1
+            }
+            if [ "$${migration_fd_identity}" != "$${migration_identity}" ]; then
+              exec 9<&-
+              echo "path changed while pinning migration node: $${migration_node}" >&2
+              return 1
+            fi
+            if [ "$${migration_type}" = f ] \
+              && [ "$$(stat -Lc %h "$${migration_fd}")" -ne 1 ]; then
+              exec 9<&-
+              echo "refusing hard-linked state file: $${migration_node}" >&2
+              return 1
+            fi
+
+            migration_current=$$(stat -c '%d:%i' "$${migration_node}" 2>/dev/null) || true
+            if [ -L "$${migration_node}" ] \
+              || [ "$${migration_current}" != "$${migration_fd_identity}" ]; then
+              exec 9<&-
+              echo "path changed before migration: $${migration_node}" >&2
+              return 1
+            fi
+            if ! chown "$${PUID}:$${PGID}" "$${migration_fd}" \
+              || ! chmod "$${migration_mode}" "$${migration_fd}"; then
+              exec 9<&-
+              echo "cannot migrate pinned node: $${migration_node}" >&2
+              return 1
+            fi
+
+            migration_current=$$(stat -c '%d:%i' "$${migration_node}" 2>/dev/null) || true
+            exec 9<&-
+            if [ -L "$${migration_node}" ] \
+              || [ "$${migration_current}" != "$${migration_fd_identity}" ]; then
+              echo "path changed during migration: $${migration_node}" >&2
+              return 1
+            fi
+          done < "$${migration_list}"
+          rm -f "$${migration_list}"
+        }
+
+        for directory in /data /data/incoming /data/sorted /data/quarantine; do
+          prepare_directory "$${directory}" 0775
+        done
+        prepare_directory /state 0700
+        # State is a private sorter-only volume. Re-home all existing control
+        # nodes on every start so a supported PUID/PGID change cannot strand
+        # old 0700 directories or 0600 lock/queue files under the previous UID.
+        migrate_nodes /state d 0700
+        migrate_nodes /state f 0600
+        data_identity="$$(stat -c '%d-%i' /data)"
+        case "$${data_identity}" in ''|*[!0-9-]*) echo "cannot identify /data" >&2; exit 1 ;; esac
+        migration_marker="/state/.directory-owner-v1-$${PUID}-$${PGID}-$${data_identity}"
+        [ ! -L "$${migration_marker}" ] || { echo "refusing symlink: $${migration_marker}" >&2; exit 1; }
+        if [ -e "$${migration_marker}" ]; then
+          marker_identity=$$(stat -c '%d:%i' "$${migration_marker}") \
+            || { echo "cannot identify migration marker" >&2; exit 1; }
+          if ! exec 9<"$${migration_marker}"; then
+            echo "cannot pin migration marker" >&2
+            exit 1
+          fi
+          marker_fd=/proc/$$$$/fd/9
+          marker_fd_identity=$$(stat -Lc '%d:%i' "$${marker_fd}") || {
+            exec 9<&-
+            echo "cannot identify pinned migration marker" >&2
+            exit 1
+          }
+          marker_metadata=$$(stat -Lc '%u:%g:%a:%h' "$${marker_fd}") || {
+            exec 9<&-
+            echo "cannot inspect pinned migration marker" >&2
+            exit 1
+          }
+          if [ ! -f "$${marker_fd}" ]; then
+            exec 9<&-
+            echo "refusing non-regular migration marker" >&2
+            exit 1
+          fi
+          marker_current=$$(stat -c '%d:%i' "$${migration_marker}" 2>/dev/null) || true
+          exec 9<&-
+          if [ -L "$${migration_marker}" ] \
+            || [ "$${marker_fd_identity}" != "$${marker_identity}" ] \
+            || [ "$${marker_current}" != "$${marker_fd_identity}" ] \
+            || [ "$${marker_metadata}" != "$${PUID}:$${PGID}:600:1" ]; then
+            echo "refusing unsafe migration marker" >&2
+            exit 1
+          fi
+        else
+          # Older deployments commonly wrote date/type directories as root.
+          # Migrate directories only (not photo/video files) once per UID:GID,
+          # so the non-root sorter can add collisions and SMB can delete them.
+          migrate_nodes /data/incoming d 0775
+          migrate_nodes /data/sorted d 0775
+          migrate_nodes /data/quarantine d 0775
+
+          # Keep the exclusive creation descriptor open through validation and
+          # metadata changes. Noclobber makes this O_EXCL-like: if a peer wins
+          # the name, fail without truncating or following its node.
+          marker_umask=$$(umask)
+          umask 077
+          set -C
+          if exec 9>"$${migration_marker}"; then
+            marker_created=1
+          else
+            marker_created=0
+          fi
+          set +C
+          umask "$${marker_umask}"
+          [ "$${marker_created}" -eq 1 ] \
+            || { echo "migration marker appeared during creation" >&2; exit 1; }
+
+          marker_fd=/proc/$$$$/fd/9
+          marker_fd_identity=$$(stat -Lc '%d:%i' "$${marker_fd}") || {
+            exec 9<&-
+            echo "cannot identify created migration marker" >&2
+            exit 1
+          }
+          if [ ! -f "$${marker_fd}" ] \
+            || [ "$$(stat -Lc %h "$${marker_fd}")" -ne 1 ]; then
+            exec 9<&-
+            echo "refusing unsafe created migration marker" >&2
+            exit 1
+          fi
+          marker_current=$$(stat -c '%d:%i' "$${migration_marker}" 2>/dev/null) || true
+          if [ -L "$${migration_marker}" ] \
+            || [ "$${marker_current}" != "$${marker_fd_identity}" ]; then
+            exec 9<&-
+            echo "migration marker changed before metadata update" >&2
+            exit 1
+          fi
+          if ! chown "$${PUID}:$${PGID}" "$${marker_fd}" \
+            || ! chmod 0600 "$${marker_fd}"; then
+            exec 9<&-
+            echo "cannot prepare pinned migration marker" >&2
+            exit 1
+          fi
+          marker_current=$$(stat -c '%d:%i' "$${migration_marker}" 2>/dev/null) || true
+          exec 9<&-
+          if [ -L "$${migration_marker}" ] \
+            || [ "$${marker_current}" != "$${marker_fd_identity}" ]; then
+            echo "migration marker changed during metadata update" >&2
+            exit 1
+          fi
+        fi
+    volumes:
+      # CAMERA_DATA_SOURCE may be the named volume (default) or a bind path such as
+      # ./data. Every writer uses this same expression so initialization can
+      # never target different storage from FTP/sorter/Frame.io.
+      - ${CAMERA_DATA_SOURCE:-camera_data}:/data
+      - camera_sorter_state:/state
+    network_mode: none
+    restart: "no"
+
+  # Optional state preparation is profile-scoped so a damaged/unused Frame.io
+  # volume can never prevent the core FTP + sorter pipeline from starting.
+  frameio-init:
+    image: alpine:3.24.1
+    profiles: ["frameio"]
+    user: "0:0"
+    environment:
+      PUID: "${PUID:-99}"
+      PGID: "${PGID:-100}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        case "$${PUID}" in ''|*[!0-9]*) echo "PUID must be numeric" >&2; exit 2 ;; esac
+        case "$${PGID}" in ''|*[!0-9]*) echo "PGID must be numeric" >&2; exit 2 ;; esac
+        [ ! -L /frameio-state ] || { echo "refusing symlink: /frameio-state" >&2; exit 1; }
+        mkdir -p /frameio-state/staging
+        [ ! -L /frameio-state/staging ] && [ -d /frameio-state/staging ] \
+          || { echo "refusing unsafe Frame.io staging directory" >&2; exit 1; }
+        chown "$${PUID}:$${PGID}" /frameio-state
+        chmod 0700 /frameio-state
+        special_list=$$(mktemp /tmp/frameio-state-special.XXXXXX)
+        find /frameio-state -xdev ! -type d ! -type f -print0 > "$${special_list}"
+        if [ -s "$${special_list}" ]; then
+          echo "refusing non-file node under /frameio-state" >&2
+          rm -f "$${special_list}"
+          exit 1
+        fi
+        rm -f "$${special_list}"
+        directory_list=$$(mktemp /tmp/frameio-state-dirs.XXXXXX)
+        find /frameio-state -xdev -type d -print0 > "$${directory_list}"
+        while IFS= read -r -d '' node; do
+          chown "$${PUID}:$${PGID}" "$${node}"
+          chmod 0700 "$${node}"
+        done < "$${directory_list}"
+        rm -f "$${directory_list}"
+        file_list=$$(mktemp /tmp/frameio-state-files.XXXXXX)
+        find /frameio-state -xdev -type f -print0 > "$${file_list}"
+        while IFS= read -r -d '' node; do
+          [ "$$(stat -c %h "$${node}")" -eq 1 ] \
+            || { echo "refusing hard-linked state file: $${node}" >&2; exit 1; }
+          chown "$${PUID}:$${PGID}" "$${node}"
+          chmod 0600 "$${node}"
+        done < "$${file_list}"
+        rm -f "$${file_list}"
+    volumes:
+      - frameio_state:/frameio-state
+    network_mode: none
+    restart: "no"
+
   ftp:
     image: stilliard/pure-ftpd:latest
     container_name: camera-ftp
@@ -7,45 +325,63 @@ services:
       FTP_USER_NAME: ${FTP_USER:-cameras}
       FTP_USER_PASS: ${FTP_PASS:-cameras}
       FTP_USER_HOME: /data/incoming
+      FTP_USER_UID: "${PUID:-99}"
+      FTP_USER_GID: "${PGID:-100}"
       FTP_PASSIVE_PORTS: "30000:30009"
     ports:
       - "21:21"
       - "30000-30009:30000-30009"
     volumes:
-      # Option A (named volume — Docker manages storage):
-      - camera_data:/data
-      # Option B (bind mount — explicit host path, easier to access files directly):
-      # Uncomment the line below and comment out Option A:
-      # - ${DATA_DIR:-./data}:/data
+      # Default is the camera_data volume. Set CAMERA_DATA_SOURCE=./data (or an
+      # absolute host path) to make this and data-init use a bind mount instead.
+      - ${CAMERA_DATA_SOURCE:-camera_data}:/data
     networks:
       - camera_net
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   sorter:
     build: .
     container_name: camera-sorter
+    user: "${PUID:-99}:${PGID:-100}"
     environment:
       INCOMING: /data/incoming
       SORTED: /data/sorted
       QUARANTINE: /data/quarantine
       STABLE_WAIT: ${STABLE_WAIT:-60}
+      STABLE_SKIP_AGE: ${STABLE_SKIP_AGE:-3600}
+      SORT_WORKERS: ${SORT_WORKERS:-4}
+      # Periodic full scans catch missed events and report uploads that remain
+      # in incoming longer than the configured number of minutes.
+      RECONCILE_IDLE: ${RECONCILE_IDLE:-300}
+      STUCK_AGE_MIN: ${STUCK_AGE_MIN:-60}
+      LOCK_ROOT: ${LOCK_ROOT:-/var/lib/camera-sorter}
+      WATCH_READY_TIMEOUT: ${WATCH_READY_TIMEOUT:-30}
       NOTIFY_INTERVAL: ${NOTIFY_INTERVAL:-300}
       RAW_FULL_VALIDATE: ${RAW_FULL_VALIDATE:-1}
       RAW_VALIDATE_TIMEOUT: ${RAW_VALIDATE_TIMEOUT:-240}
-      RAW_VALIDATE_TMPDIR: /data/.raw-validate-tmp
+      # Empty means sort.sh derives this beneath LOCK_ROOT, so changing the
+      # control mount cannot accidentally send scratch back to image overlay.
+      RAW_VALIDATE_TMPDIR: ${RAW_VALIDATE_TMPDIR:-}
+      RAW_VALIDATE_TMP_STALE_MIN: ${RAW_VALIDATE_TMP_STALE_MIN:-15}
       TG_CONFIG: /etc/telegram.json
     volumes:
-      # Must match whichever option you chose above for `ftp`:
-      - camera_data:/data
-      # - ${DATA_DIR:-./data}:/data
-      #
+      - ${CAMERA_DATA_SOURCE:-camera_data}:/data
+      # Private persistent control state (locks, queues, validation scratch).
+      # Keep this volume off the SMB/FTP-exported camera data tree.
+      - camera_sorter_state:${LOCK_ROOT:-/var/lib/camera-sorter}
       # Optional: mount telegram config if you have it.
       # The sorter skips notifications gracefully if this file is absent.
       # - ./telegram.json:/etc/telegram.json:ro
     networks:
       - camera_net
     depends_on:
-      - ftp
+      data-init:
+        condition: service_completed_successfully
+      ftp:
+        condition: service_started
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -122,3 +458,5 @@ networks:
 
 volumes:
   camera_data:
+  camera_sorter_state:
+  frameio_state:

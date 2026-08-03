@@ -1,0 +1,10 @@
+#!/bin/sh
+
+if [ "${TEST_STUBBORN_STAGE:-}" = "identify" ]; then
+  trap '' TERM
+  while true; do
+    /bin/sleep 1
+  done
+fi
+
+exit 0

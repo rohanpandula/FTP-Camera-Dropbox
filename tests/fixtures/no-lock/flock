@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# Simulate a backing filesystem that accepts flock calls without enforcing
+# exclusion: every lock attempt appears to succeed.
+exit 0

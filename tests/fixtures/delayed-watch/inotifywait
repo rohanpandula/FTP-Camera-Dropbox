@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+# Hold watch installation behind a harness-controlled gate. This stays
+# deterministic on a loaded host: a sorter without the readiness handshake
+# cannot merely outlast a fixed sleep and accidentally pass.
+: > "${TEST_WATCH_INVOKED_FILE:?TEST_WATCH_INVOKED_FILE is required}"
+probe_dir=""
+for arg in "$@"; do
+  probe_dir=$arg
+done
+attempts=0
+probe=""
+while [ "$attempts" -lt 300 ]; do
+  probe=$(find "$probe_dir" -maxdepth 1 -type f -name '.event.*' -print -quit 2>/dev/null || true)
+  [ -n "$probe" ] && [ -s "$probe" ] && break
+  attempts=$((attempts + 1))
+  /bin/sleep 0.05
+done
+[ -n "$probe" ] && [ -s "$probe" ] || exit 39
+: > "${TEST_WATCH_PARENT_PROBED_FILE:?TEST_WATCH_PARENT_PROBED_FILE is required}"
+attempts=0
+while [ ! -e "${TEST_WATCH_RELEASE_FILE:?TEST_WATCH_RELEASE_FILE is required}" ] \
+  && [ "$attempts" -lt 1200 ]; do
+  attempts=$((attempts + 1))
+  /bin/sleep 0.05
+done
+
+[ -e "$TEST_WATCH_RELEASE_FILE" ] || exit 40
+exec /usr/bin/inotifywait "$@"

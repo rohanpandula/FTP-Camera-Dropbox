@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+# Record only process-claim acquisitions. Resolving the inherited descriptor
+# proves duplicate events actually produced competing workers; without this
+# gate, a coalesced inotify event could make the duplicate-path test pass while
+# never exercising the claim lock.
+claim_fd=""
+for arg in "$@"; do
+  case "$arg" in
+    *[!0-9]*|'') ;;
+    *) claim_fd=$arg ;;
+  esac
+done
+
+if [ -n "$claim_fd" ]; then
+  claim_path=$(readlink "/proc/$$/fd/$claim_fd" 2>/dev/null || true)
+  case "$claim_path" in
+    */process/*.lock)
+      printf '%s\n' "$claim_path" >> "${TEST_CLAIM_FLOCK_LOG:?TEST_CLAIM_FLOCK_LOG is required}"
+      ;;
+  esac
+fi
+
+exec /usr/bin/flock "$@"

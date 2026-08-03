@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+printf '%s\n' "$*" >> "${TEST_FLOCK_CALL_LOG:?TEST_FLOCK_CALL_LOG is required}"
+exec /usr/bin/flock "$@"

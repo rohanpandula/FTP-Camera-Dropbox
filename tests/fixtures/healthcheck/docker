@@ -1,0 +1,53 @@
+#!/bin/bash
+set -u
+
+if [[ ${FAKE_DOCKER_SLEEP:-0} != 0 ]]; then
+  sleep "$FAKE_DOCKER_SLEEP"
+fi
+
+present() {
+  case "$1" in
+    camera-ftp) [[ ${FAKE_CAMERA_FTP_PRESENT:-1} == 1 ]] ;;
+    pure-ftpd) [[ ${FAKE_PURE_FTP_PRESENT:-0} == 1 ]] ;;
+    camera-sorter) [[ ${FAKE_SORTER_PRESENT:-1} == 1 ]] ;;
+    frameio-mirror) [[ ${FAKE_FRAMEIO_PRESENT:-0} == 1 ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+status_for() {
+  case "$1" in
+    camera-ftp|pure-ftpd) printf '%s\n' "${FAKE_FTP_STATUS:-running}" ;;
+    camera-sorter) printf '%s\n' "${FAKE_SORTER_STATUS:-running}" ;;
+    frameio-mirror) printf '%s\n' "${FAKE_FRAMEIO_STATUS:-running}" ;;
+  esac
+}
+
+case ${1:-} in
+  info)
+    exit "${FAKE_DOCKER_INFO_RC:-0}"
+    ;;
+  inspect)
+    container=${2:-}
+    present "$container" || exit 1
+    case "$*" in
+      *State.Status*) status_for "$container" ;;
+      *State.ExitCode*) printf '%s\n' "${FAKE_EXIT_CODE:-1}" ;;
+      *State.StartedAt*) printf '%s\n' '2020-01-01T00:00:00Z' ;;
+    esac
+    ;;
+  start)
+    exit "${FAKE_START_RC:-0}"
+    ;;
+  exec)
+    container=${2:-}
+    case "$container" in
+      camera-ftp|pure-ftpd) exit "${FAKE_FTP_LISTEN_RC:-0}" ;;
+      frameio-mirror) exit "${FAKE_FRAMEIO_HEALTH_RC:-0}" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *)
+    exit 64
+    ;;
+esac
