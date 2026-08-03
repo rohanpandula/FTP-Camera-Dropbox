@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+case " $* " in
+  *" -validate "*)
+    exit 0
+    ;;
+  *" -DateTimeOriginal "*)
+    printf '%s\n' '2026-08-02'
+    ;;
+  *)
+    printf '%s\n' 'TEST CAMERA'
+    ;;
+esac

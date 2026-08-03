@@ -1,0 +1,8 @@
+#!/bin/bash
+set -u
+
+if [[ -n ${FAKE_CURL_LOG:-} ]]; then
+  printf '%s\n' "$*" >> "$FAKE_CURL_LOG"
+fi
+printf '%s\n' "${FAKE_CURL_BODY:-{\"ok\":true}}"
+exit "${FAKE_CURL_RC:-0}"

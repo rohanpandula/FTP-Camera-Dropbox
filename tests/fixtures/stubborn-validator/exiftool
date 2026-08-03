@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+args=" $* "
+stage=${TEST_STUBBORN_STAGE:-container}
+hang=0
+
+case "$stage:$args" in
+  container:*" -validate "*|date:*" -DateTimeOriginal "*|\
+  raw-model:*" -Model -s3 "*|camera-model:*" -Model -s3 "*|\
+  raw-readable:*" -Make -Model -s3 "*|camera-make:*" -Make -s3 "*|\
+  filetype:*" -FileType -s3 "*|duration:*" -Duration "*)
+    hang=1
+    ;;
+esac
+
+if [ "$hang" -eq 1 ]; then
+  # Simulate a hostile parser that catches TERM and needs timeout's KILL grace.
+  trap '' TERM
+  while true; do
+    /bin/sleep 1
+  done
+fi
+
+case "$args" in
+  *" -validate "*) exit 0 ;;
+  *" -DateTimeOriginal "*) printf '%s\n' '2026-08-02' ;;
+  *" -Duration "*) printf '%s\n' 'Duration: 1.00 s' ;;
+  *" -FileType "*) printf '%s\n' 'MOV' ;;
+  *" -Make -Model "*) printf '%s\n' 'TEST MAKE' 'TEST MODEL' ;;
+  *" -Make "*) printf '%s\n' 'TEST MAKE' ;;
+  *" -Model "*) printf '%s\n' 'TEST MODEL' ;;
+  *) printf '%s\n' 'TEST CAMERA' ;;
+esac

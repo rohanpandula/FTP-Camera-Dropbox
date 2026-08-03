@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+state_dir=${TEST_VALIDATOR_STATE_DIR:?TEST_VALIDATOR_STATE_DIR is required}
+release_file=${TEST_VALIDATOR_RELEASE_FILE:?TEST_VALIDATOR_RELEASE_FILE is required}
+mkdir -p "$state_dir"
+: > "$state_dir/entered.$$"
+
+# The harness releases all four validators together. Its own watchdog expires
+# before this fallback, so a serial implementation cannot accumulate markers
+# from validators that have already left the gate.
+attempts=0
+while [ ! -e "$release_file" ] && [ "$attempts" -lt 1200 ]; do
+  attempts=$((attempts + 1))
+  /bin/sleep 0.05
+done
+
+[ -e "$release_file" ] || exit 99
+exit 0

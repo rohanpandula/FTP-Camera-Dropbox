@@ -1,0 +1,65 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${TEST_NOTIFIER_SLEEP_LOG:-}" ] \
+  && [ -n "${TEST_NOTIFY_INTERVAL:-}" ] \
+  && [ "${1:-}" = "$TEST_NOTIFY_INTERVAL" ]; then
+  printf '%s\n' "$$" >> "$TEST_NOTIFIER_SLEEP_LOG"
+fi
+
+if [ "${1:-}" = "${TEST_STABLE_WAIT:-}" ]; then
+  if [ -n "${TEST_ASSERT_ABSENT:-}" ] && [ -e "$TEST_ASSERT_ABSENT" ]; then
+    printf '%s\n' "$TEST_ASSERT_ABSENT" >> "${TEST_ASSERT_FAILURE_LOG:?}"
+  fi
+
+  if [ -n "${TEST_SLEEP_LOG:-}" ]; then
+    printf '%s\n' "$$" >> "$TEST_SLEEP_LOG"
+  fi
+
+  if [ -n "${TEST_FORK_CHILDREN_LOG:-}" ]; then
+    /bin/sleep "$@" &
+    first_child=$!
+    /bin/sleep "$@" &
+    second_child=$!
+    printf '%s\n%s\n' "$first_child" "$second_child" >> "$TEST_FORK_CHILDREN_LOG"
+    wait "$first_child" "$second_child"
+    exit 0
+  fi
+
+  if [ -n "${TEST_SLEEP_STATE_DIR:-}" ]; then
+    state_dir=$TEST_SLEEP_STATE_DIR
+    mkdir -p "$state_dir"
+    exec 9>"$state_dir/lock"
+    flock -x 9
+    active=$(cat "$state_dir/active" 2>/dev/null || echo 0)
+    active=$((active + 1))
+    printf '%s\n' "$active" > "$state_dir/active"
+    maximum=$(cat "$state_dir/max" 2>/dev/null || echo 0)
+    if [ "$active" -gt "$maximum" ]; then
+      printf '%s\n' "$active" > "$state_dir/max"
+    fi
+    flock -u 9
+
+    # Let the harness hold the first worker cohort at a rendezvous. This makes
+    # concurrency assertions deterministic even when the Docker host is busy:
+    # the test releases the cohort only after every expected worker has entered
+    # wait_stable, instead of inferring concurrency from elapsed wall time.
+    if [ -n "${TEST_SLEEP_RELEASE_FILE:-}" ]; then
+      attempts=0
+      while [ ! -e "$TEST_SLEEP_RELEASE_FILE" ] && [ "$attempts" -lt 600 ]; do
+        attempts=$((attempts + 1))
+        /bin/sleep 0.05
+      done
+    fi
+
+    /bin/sleep "$@"
+
+    flock -x 9
+    active=$(cat "$state_dir/active")
+    printf '%s\n' "$((active - 1))" > "$state_dir/active"
+    flock -u 9
+    exit 0
+  fi
+fi
+
+exec /bin/sleep "$@"

@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+lock_fd=""
+for arg in "$@"; do
+  case "$arg" in
+    *[!0-9]*|'') ;;
+    *) lock_fd=$arg ;;
+  esac
+done
+
+if [ "${TEST_FAIL_NOTIFY_FLOCK:-0}" = 1 ] && [ -n "$lock_fd" ]; then
+  lock_path=$(readlink "/proc/$$/fd/$lock_fd" 2>/dev/null || true)
+  case "$lock_path" in
+    */notify.lock)
+      printf '%s\n' "$lock_path" \
+        >> "${TEST_FAILED_FLOCK_LOG:?TEST_FAILED_FLOCK_LOG is required}"
+      exit 1
+      ;;
+  esac
+fi
+
+exec /usr/bin/flock "$@"

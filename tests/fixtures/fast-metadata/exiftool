@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# Keep the worker-pool speed test focused on stability waits rather than
+# architecture-dependent ExifTool startup time.
+printf '%s\n' 'TEST CAMERA'

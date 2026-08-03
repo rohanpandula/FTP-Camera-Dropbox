@@ -1,0 +1,159 @@
+#!/bin/sh
+set -eu
+
+# Test-only race widener. The first mv waits for a second caller. An unlocked
+# check-then-move implementation reaches the gate twice and exposes an
+# overwrite; the correct destination lock pays one bounded fallback, disables
+# the gate, and lets every later move proceed without another delay.
+if [ -n "${TEST_MV_GATE_DIR:-}" ]; then
+  gate_dir=$TEST_MV_GATE_DIR
+  mkdir -p "$gate_dir"
+  exec 9>"$gate_dir/lock"
+  flock -x 9
+  first=0
+  if [ ! -e "$gate_dir/disabled" ]; then
+    if [ -e "$gate_dir/first" ]; then
+      : > "$gate_dir/release"
+    else
+      : > "$gate_dir/first"
+      first=1
+    fi
+  fi
+  flock -u 9
+
+  if [ "$first" -eq 1 ]; then
+    deadline=$(($(date +%s) + 10))
+    while [ ! -e "$gate_dir/release" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+      /bin/sleep 0.05
+    done
+    flock -x 9
+    : > "$gate_dir/disabled"
+    : > "$gate_dir/release"
+    flock -u 9
+  fi
+fi
+
+# Exercise the rollback containment check itself. Call 1 displaces the pinned
+# output directory so the sorter must roll back. Call 2 moves the pinned source
+# parent outside incoming immediately before that rollback mv; call 3 is the
+# sorter's exact-inode reverse recovery back to its pinned destination.
+if [ "${TEST_MV_SWAP_SOURCE_PARENT_ON_ROLLBACK:-0}" = 1 ]; then
+  inject_dir=${TEST_MV_INJECT_STATE_DIR:?TEST_MV_INJECT_STATE_DIR is required}
+  mkdir -p "$inject_dir"
+  exec 8>"$inject_dir/rollback-lock"
+  flock -x 8
+  call=0
+  if [ -f "$inject_dir/rollback-call" ]; then
+    call=$(cat "$inject_dir/rollback-call")
+  fi
+  call=$((call + 1))
+  printf '%s\n' "$call" > "$inject_dir/rollback-call"
+
+  source=""
+  destination=""
+  for arg in "$@"; do
+    source=$destination
+    destination=$arg
+  done
+
+  if [ "$call" -eq 1 ]; then
+    destination_parent=${destination%/*}
+    if [ "$destination_parent" = "." ]; then
+      destination_parent=$(/bin/pwd -P)
+    fi
+    displaced_parent="${destination_parent}.displaced"
+    /bin/mv -T -- "$destination_parent" "$displaced_parent"
+    ln -s -- "${TEST_MV_SWAP_ANCESTOR_TARGET:?TEST_MV_SWAP_ANCESTOR_TARGET is required}" \
+      "$destination_parent"
+  elif [ "$call" -eq 2 ]; then
+    source_parent=${TEST_MV_SWAP_SOURCE_PARENT_PATH:?TEST_MV_SWAP_SOURCE_PARENT_PATH is required}
+    source_displaced=${TEST_MV_SOURCE_DISPLACED_DIR:?TEST_MV_SOURCE_DISPLACED_DIR is required}
+    /bin/mv -T -- "$source_parent" "$source_displaced"
+    ln -s -- "${TEST_MV_SWAP_SOURCE_PARENT_TARGET:?TEST_MV_SWAP_SOURCE_PARENT_TARGET is required}" \
+      "$source_parent"
+  fi
+  flock -u 8
+
+  set +e
+  /bin/mv "$@"
+  move_rc=$?
+  set -e
+  : > "$inject_dir/mv-returned-$call"
+  exit "$move_rc"
+fi
+
+# Simulate an SMB writer changing the selected destination after the sorter's
+# safety checks but immediately before mv. Each mode exercises a distinct
+# no-clobber or path-confinement race.
+if [ -n "${TEST_MV_INJECT_STATE_DIR:-}" ]; then
+  inject_dir=$TEST_MV_INJECT_STATE_DIR
+  mkdir -p "$inject_dir"
+  if [ ! -e "$inject_dir/done" ]; then
+    source=""
+    destination=""
+    for arg in "$@"; do
+      source=$destination
+      destination=$arg
+    done
+
+    if [ -n "${TEST_MV_SWAP_SOURCE_LEAF_KIND:-}" ]; then
+      # Replace the already-validated regular source leaf with a non-file node
+      # immediately before mv. The sorter must lstat the moved node, return that
+      # exact inode through its pinned source parent, and leave output clean.
+      /bin/mv -T -- "$source" "$source.part"
+      case "$TEST_MV_SWAP_SOURCE_LEAF_KIND" in
+        regular)
+          printf 'REPLACEMENT REGULAR PAYLOAD\n' > "$source"
+          # Keep the restored replacement from being legitimately sorted by a
+          # second live inotify event before the harness can inspect it. It is
+          # still a regular inode, which is the rollback property under test.
+          chmod 000 -- "$source"
+          ;;
+        symlink)
+          ln -s -- "${TEST_MV_SOURCE_LEAF_SYMLINK_TARGET:?TEST_MV_SOURCE_LEAF_SYMLINK_TARGET is required}" \
+            "$source"
+          ;;
+        fifo) mkfifo -- "$source" ;;
+        *) echo "unknown source leaf kind: $TEST_MV_SWAP_SOURCE_LEAF_KIND" >&2; exit 64 ;;
+      esac
+    elif [ -n "${TEST_MV_SWAP_SOURCE_PARENT_TARGET:-}" ]; then
+      # Replace a nested incoming parent after the sorter has identified the
+      # camera inode but before mv resolves the absolute source pathname. The
+      # replacement tree contains a different same-name payload; safe code
+      # must not mistake that inode for the camera file.
+      source_parent=${TEST_MV_SWAP_SOURCE_PARENT_PATH:-${source%/*}}
+      source_displaced=${TEST_MV_SOURCE_DISPLACED_DIR:?TEST_MV_SOURCE_DISPLACED_DIR is required}
+      /bin/mv -T -- "$source_parent" "$source_displaced"
+      ln -s -- "$TEST_MV_SWAP_SOURCE_PARENT_TARGET" "$source_parent"
+    elif [ "${TEST_MV_INJECT_SYMLINK_TO_SOURCE:-0}" = 1 ]; then
+      # Model an SMB writer replacing the selected leaf with a symlink to the
+      # still-live source between the sorter's lstat and mv. A post-move stat
+      # that follows this link sees the source inode and can falsely report a
+      # successful rename.
+      ln -s -- "$source" "$destination"
+    elif [ -n "${TEST_MV_SWAP_ANCESTOR_TARGET:-}" ]; then
+      # Replace the already-validated type directory just before mv. A
+      # path-based rename follows this new ancestor and escapes the sorted
+      # root unless the sorter pins, revalidates, and recovers the source.
+      destination_parent=${destination%/*}
+      if [ "$destination_parent" = "." ]; then
+        destination_parent=$(/bin/pwd -P)
+      fi
+      displaced_parent="${destination_parent}.displaced"
+      /bin/mv -T -- "$destination_parent" "$displaced_parent"
+      ln -s -- "$TEST_MV_SWAP_ANCESTOR_TARGET" "$destination_parent"
+    else
+      printf '%s\n' "${TEST_MV_INJECT_CONTENT:-external collision}" > "$destination"
+    fi
+    : > "$inject_dir/done"
+  fi
+
+  set +e
+  /bin/mv "$@"
+  move_rc=$?
+  set -e
+  : > "$inject_dir/mv-returned"
+  exit "$move_rc"
+fi
+
+exec /bin/mv "$@"

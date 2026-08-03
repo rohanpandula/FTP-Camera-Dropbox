@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+# Emit the private readiness probe once, then die. This gets the sorter through
+# startup and exercises EOF handling in the live event loop rather than the
+# separate "died before readiness" branch.
+probe_dir=""
+for arg in "$@"; do
+  probe_dir=$arg
+done
+
+attempts=0
+probe=""
+while [ "$attempts" -lt 100 ]; do
+  probe=$(find "$probe_dir" -maxdepth 1 -type f -name '.event.*' -print -quit 2>/dev/null || true)
+  [ -n "$probe" ] && break
+  attempts=$((attempts + 1))
+  /bin/sleep 0.05
+done
+
+[ -n "$probe" ] || exit 41
+printf '%s\n' "$probe"
+exit 42
