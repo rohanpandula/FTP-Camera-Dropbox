@@ -454,6 +454,25 @@ def api_library_day(date: str):
 
 # ----------------------------------------------------------------- thumbs ----
 
+# EXIF orientation 1-8 -> PIL transpose. Embedded raw previews are usually
+# stored unrotated with NO orientation tag of their own (verified on A7CR
+# ARWs: 1616x1080 landscape preview, orientation only on the outer file), so
+# exif_transpose alone silently no-ops — the source file's tag is authoritative.
+_TRANSPOSE = {2: Image.Transpose.FLIP_LEFT_RIGHT, 3: Image.Transpose.ROTATE_180,
+              4: Image.Transpose.FLIP_TOP_BOTTOM, 5: Image.Transpose.TRANSPOSE,
+              6: Image.Transpose.ROTATE_270, 7: Image.Transpose.TRANSVERSE,
+              8: Image.Transpose.ROTATE_90}
+
+
+def source_orientation(path: Path) -> int:
+    try:
+        out = subprocess.run(["exiftool", "-Orientation#", "-s3", str(path)],
+                             capture_output=True, timeout=15).stdout.decode().strip()
+        return int(out or "1")
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return 1
+
+
 def extract_preview(path: Path) -> bytes | None:
     for tag in ("-PreviewImage", "-JpgFromRaw", "-OtherImage", "-ThumbnailImage"):
         try:
@@ -481,7 +500,7 @@ def api_thumb(f: str):
     except OSError:
         return err("no preview", 404)
 
-    key = hashlib.sha1(f"{f}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest() + ".jpg"
+    key = hashlib.sha1(f"o2:{f}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest() + ".jpg"
     cached = THUMBS / key
     if cached.is_file():
         return FileResponse(cached, media_type="image/jpeg",
@@ -500,7 +519,17 @@ def api_thumb(f: str):
             return err("no embedded preview", 404)
         try:
             img = Image.open(io.BytesIO(raw))
-            img = ImageOps.exif_transpose(img)
+            own = 1
+            try:
+                own = int(img.getexif().get(0x0112) or 1)
+            except Exception:
+                pass
+            if own != 1:
+                img = ImageOps.exif_transpose(img)
+            elif ext in RAW_EXTS:
+                o = source_orientation(path)
+                if o in _TRANSPOSE:
+                    img = img.transpose(_TRANSPOSE[o])
             img.thumbnail((480, 480))
             buf = io.BytesIO()
             img.convert("RGB").save(buf, "JPEG", quality=82)
