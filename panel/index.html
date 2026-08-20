@@ -194,6 +194,9 @@ const TABS = [
   ["folders",    "FOLDERS"],
   ["quarantine", "QUARANTINE"],
 ];
+// Bump when thumb RENDERING changes: thumbs are cached immutable by URL,
+// so the URL must change for browsers to refetch corrected images.
+const THUMB_V = 2;
 let tab = location.hash.slice(1) || "overview";
 let config = null;
 let pollTimer = null;
@@ -278,7 +281,7 @@ async function refreshOverview() {
     $("#sheet").outerHTML = files.length ? `<figure class="sheet" id="sheet">` + files.map(f => {
       const canThumb = /\.(nef|arw|raf|dng|nrw|jpe?g|tiff?)$/i.test(f.name);
       return `<figure class="frame">
-        ${canThumb ? `<img loading="lazy" src="/api/thumb?f=${encodeURIComponent(f.rel)}"
+        ${canThumb ? `<img loading="lazy" src="/api/thumb?v=${THUMB_V}&f=${encodeURIComponent(f.rel)}"
                         onerror="this.outerHTML='<div class=ph>NO PREVIEW</div>'">`
                    : `<div class="ph">${esc(f.type.toUpperCase())}</div>`}
         <figcaption><div class="fn">${esc(f.name)}</div>
@@ -422,7 +425,7 @@ async function renderDecisions() {
     unanswered questions auto-close after ${esc(String(cfg.ask_timeout_hours))}h with no changes.</p>
     <div class="rows">` + (d.pending.length ? d.pending.map(q => `
       <div class="row" style="align-items:flex-start">
-        <img loading="lazy" src="/api/thumb?f=${encodeURIComponent(q.rel)}"
+        <img loading="lazy" src="/api/thumb?v=${THUMB_V}&f=${encodeURIComponent(q.rel)}"
              style="width:96px;aspect-ratio:3/2;object-fit:cover;border-radius:4px;border:1px solid var(--hairline)"
              onerror="this.style.display='none'">
         <div class="grow">
@@ -502,7 +505,7 @@ async function renderDay(date) {
     <div class="sheet">` + d.files.map(f => {
       const canThumb = /\.(nef|arw|raf|dng|nrw|jpe?g|tiff?)$/i.test(f.name);
       return `<figure class="frame">
-        ${canThumb ? `<img loading="lazy" src="/api/thumb?f=${encodeURIComponent(f.rel)}"
+        ${canThumb ? `<img loading="lazy" src="/api/thumb?v=${THUMB_V}&f=${encodeURIComponent(f.rel)}"
                         onerror="this.outerHTML='<div class=ph>NO PREVIEW</div>'">`
                    : `<div class="ph">${esc(f.type.toUpperCase())}</div>`}
         <figcaption><div class="fn">${esc(f.name)}</div>
