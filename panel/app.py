@@ -633,6 +633,115 @@ async def api_quarantine_action(request: Request):
     return no_store({"ok": True, "moved_to": f"_trash/{dest.name}"})
 
 
+# ---------------------------------------------------------- camera registry ----
+# Distinct camera bodies seen in the library, so rule scoping offers a
+# consistent taxonomy instead of free-typed variants. Labels are composed
+# EXACTLY like sort.sh's get_camera (that's the string rules match against).
+# Scanning is incremental: one exiftool batch per date-dir, re-run only when
+# that day's directory signature changes; results cached per-dir.
+
+CAMERAS_CACHE = PANEL_DIR / "cameras.json"
+CAM_SCAN_EXTS = ("nef", "nrw", "arw", "raf", "dng", "cr2", "cr3",
+                 "jpg", "jpeg", "heic", "heif", "mp4", "mov", "m4v")
+_camera_scan_lock = threading.Lock()
+_camera_kick = {"ts": 0.0}
+
+
+def _camera_label(make: str, model: str) -> str:
+    make, model = " ".join(make.split())[:100], " ".join(model.split())[:100]
+    head = make.split(" ", 1)[0] if make else ""
+    if make and model and model.startswith(head):
+        return model
+    if make and model:
+        return f"{make} {model}"
+    return model or "Unknown"
+
+
+def _dir_sig(day: Path) -> int:
+    sig = int(day.stat().st_mtime)
+    for t in day.iterdir():
+        try:
+            if t.is_dir():
+                sig = max(sig, int(t.stat().st_mtime))
+        except OSError:
+            continue
+    return sig
+
+
+def scan_cameras_pass():
+    if not _camera_scan_lock.acquire(blocking=False):
+        return
+    try:
+        try:
+            cache = json.load(open(CAMERAS_CACHE))
+        except Exception:
+            cache = {}
+        dirs = cache.get("dirs", {}) if isinstance(cache.get("dirs"), dict) else {}
+        changed = False
+        if SORTED.is_dir():
+            for day in SORTED.iterdir():
+                if not day.is_dir() or not DATE_RE.match(day.name):
+                    continue
+                try:
+                    sig = _dir_sig(day)
+                except OSError:
+                    continue
+                if dirs.get(day.name, {}).get("sig") == sig:
+                    continue
+                ext_args = [a for e in CAM_SCAN_EXTS for a in ("-ext", e)]
+                try:
+                    out = subprocess.run(
+                        ["exiftool", "-q", "-fast2", "-T", "-Make", "-Model", "-r",
+                         *ext_args, str(day)],
+                        capture_output=True, timeout=600).stdout.decode(errors="replace")
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+                counts: dict[str, int] = {}
+                for line in out.splitlines():
+                    parts = line.split("\t")
+                    make = parts[0] if parts and parts[0] != "-" else ""
+                    model = parts[1] if len(parts) > 1 and parts[1] != "-" else ""
+                    label = _camera_label(make, model)
+                    counts[label] = counts.get(label, 0) + 1
+                dirs[day.name] = {"sig": sig, "cameras": counts}
+                changed = True
+        if changed:
+            fd, tmp = tempfile.mkstemp(dir=PANEL_DIR, prefix=".cams.")
+            with os.fdopen(fd, "w") as f:
+                json.dump({"dirs": dirs, "scanned_at": int(time.time())}, f)
+            os.chmod(tmp, 0o664)
+            os.replace(tmp, CAMERAS_CACHE)
+            log.info("camera registry updated: %d date dirs", len(dirs))
+    finally:
+        _camera_scan_lock.release()
+
+
+@app.get("/api/cameras")
+def api_cameras():
+    # Serve the cache immediately; kick an incremental rescan in the
+    # background (single-flight, throttled) so new bodies appear soon after
+    # their first upload.
+    now = time.time()
+    if now - _camera_kick["ts"] > 30:
+        _camera_kick["ts"] = now
+        threading.Thread(target=scan_cameras_pass, daemon=True).start()
+    totals: dict[str, int] = {}
+    scanned_at = None
+    try:
+        cache = json.load(open(CAMERAS_CACHE))
+        scanned_at = cache.get("scanned_at")
+        for d in cache.get("dirs", {}).values():
+            for name, n in d.get("cameras", {}).items():
+                if isinstance(n, int):
+                    totals[name] = totals.get(name, 0) + n
+    except Exception:
+        pass
+    cams = [{"name": k, "count": v} for k, v in
+            sorted(totals.items(), key=lambda kv: -kv[1])][:30]
+    return no_store({"cameras": cams, "scanning": _camera_scan_lock.locked(),
+                     "scanned_at": scanned_at})
+
+
 # --------------------------------------------------- lens decisions (ask) ----
 # The sorter drops a JSON question into .panel/pending/ when it meets glass no
 # rule matches (dumb M-mount adapters, unrecognized smart-adapter strings).
