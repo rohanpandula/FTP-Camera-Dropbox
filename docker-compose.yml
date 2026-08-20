@@ -371,6 +371,12 @@ services:
       # control mount cannot accidentally send scratch back to image overlay.
       RAW_VALIDATE_TMPDIR: ${RAW_VALIDATE_TMPDIR:-}
       RAW_VALIDATE_TMP_STALE_MIN: ${RAW_VALIDATE_TMP_STALE_MIN:-15}
+      # NEF post-sort hooks (optional): rewrite adapted-lens identity tags,
+      # and hard-link each newly sorted NEF into a render queue watched by a
+      # nef-watch container (github.com/rohanpandula/nef-watch) whose --out
+      # points back at sorted/ so TIFFs land next to their NEFs.
+      NEF_LENS_MASSAGE: ${NEF_LENS_MASSAGE:-0}
+      NEF_QUEUE: ${NEF_QUEUE:-}
       TG_CONFIG: /etc/telegram.json
     volumes:
       - ${CAMERA_DATA_SOURCE:-camera_data}:/data
