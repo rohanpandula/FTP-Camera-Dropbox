@@ -348,6 +348,8 @@ async function renderRules() {
         <div class="grow engraving mono">
           <span>${r.match_lens.map(esc).join(" · ")}</span>
           ${r.match_lens_id_regex ? `<span class="m">id~${esc(r.match_lens_id_regex)}</span>` : ""}
+          ${r.match_camera ? `<span class="m">@ ${r.match_camera.map(esc).join(", ")}</span>` : ""}
+          ${r.exclude_camera ? `<span class="m" style="color:var(--reject)">not ${r.exclude_camera.map(esc).join(", ")}</span>` : ""}
           <span class="arrow">→</span>
           <span>${esc(r.lens_model || (r.set_focal_length ? r.set_focal_length + "mm focal" : ""))}</span>
           ${r.lens_info ? `<span class="m">[${esc(r.lens_info)}]</span>` : ""}
@@ -361,17 +363,28 @@ async function renderRules() {
     </div>
     <div id="ruleform"></div>
     <h2>Test a signature</h2>
-    <p class="sub">Paste a <span class="mono">Lens</span> value (e.g. <span class="mono">50mm f/1.3</span>) to see which rule fires.</p>
-    <input type="text" id="probe" placeholder="50mm f/1.3" oninput="probeRule(this.value)">
+    <p class="sub">Paste a <span class="mono">Lens</span> value (e.g. <span class="mono">50mm f/1.3</span>) and
+    optionally a body name to see which rule fires.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="text" id="probe" placeholder="50mm f/1.3" oninput="probeRule()" style="max-width:240px">
+      <input type="text" id="probe-cam" placeholder="camera (e.g. NIKON Z f)" oninput="probeRule()" style="max-width:240px">
+    </div>
     <div class="hint mono" id="proberesult"></div>`;
 }
-function probeRule(v) {
+function probeRule() {
   const out = $("#proberesult");
-  if (!v.trim()) { out.textContent = ""; return; }
-  const hit = config.lens_rules.find(r => r.match_lens.includes(v.trim()));
+  const v = $("#probe").value.trim();
+  const cam = $("#probe-cam").value.trim().toLowerCase();
+  if (!v) { out.textContent = ""; return; }
+  const camOk = r =>
+    (!r.match_camera || r.match_camera.some(m => cam.includes(m.toLowerCase()))) &&
+    (!r.exclude_camera || !r.exclude_camera.some(m => cam.includes(m.toLowerCase())));
+  const hit = config.lens_rules.find(r => r.match_lens.includes(v) && camOk(r));
+  const camNote = config.lens_rules.some(r => r.match_lens.includes(v) && !camOk(r))
+    ? "  (a rule exists but this camera is excluded)" : "";
   out.textContent = hit
     ? `→ ${hit.lens_model || hit.set_focal_length + "mm"}${hit.match_lens_id_regex ? "  (if LensID ~ " + hit.match_lens_id_regex + ")" : ""}`
-    : "no rule matches — file passes through untouched";
+    : `no rule matches — file passes through untouched${camNote}`;
   out.style.color = hit ? "var(--safelight)" : "var(--faint)";
 }
 function editRule(i) {
@@ -379,6 +392,8 @@ function editRule(i) {
   $("#ruleform").innerHTML = `<div class="field-grid">
     <label>MATCH LENS (comma-sep)</label><input type="text" id="f-match" value="${esc((r.match_lens||[]).join(", "))}" placeholder="50mm f/1.2, 50mm f/1.3">
     <label>LENSID REGEX (optional)<div class="hint" style="margin-top:3px">POSIX ERE — \d and (?:…) won't work</div></label><input type="text" id="f-regex" value="${esc(r.match_lens_id_regex||"")}" placeholder="Leica.*35">
+    <label>ONLY THESE CAMERAS<div class="hint" style="margin-top:3px">comma-sep substrings, e.g. Z f, 7CR — blank = any body</div></label><input type="text" id="f-cam" value="${esc((r.match_camera||[]).join(", "))}" placeholder="Z f">
+    <label>NEVER THESE CAMERAS</label><input type="text" id="f-xcam" value="${esc((r.exclude_camera||[]).join(", "))}" placeholder="GFX100 II">
     <label>SET LENS MODEL</label><input type="text" id="f-model" value="${esc(r.lens_model||"")}" placeholder="FE 50mm F1.2 GM">
     <label>SET LENS INFO</label><input type="text" id="f-info" value="${esc(r.lens_info||"")}" placeholder="50 50 1.2 1.2">
     <label>SET FOCAL LENGTH</label><input type="text" id="f-focal" value="${esc(r.set_focal_length||"")}" placeholder="35">
@@ -393,6 +408,10 @@ async function saveRule(i) {
   const match = $("#f-match").value.split(",").map(s => s.trim()).filter(Boolean);
   if (match.length) rule.match_lens = match;
   const rx = $("#f-regex").value.trim(); if (rx) rule.match_lens_id_regex = rx;
+  const cams = $("#f-cam").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (cams.length) rule.match_camera = cams;
+  const xcams = $("#f-xcam").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (xcams.length) rule.exclude_camera = xcams;
   const model = $("#f-model").value.trim(); if (model) rule.lens_model = model;
   const info = $("#f-info").value.trim(); if (info) rule.lens_info = info;
   const focal = $("#f-focal").value.trim(); if (focal) rule.set_focal_length = focal;
@@ -430,7 +449,7 @@ async function renderDecisions() {
              onerror="this.style.display='none'">
         <div class="grow">
           <div class="mono name">${esc(q.rel)}</div>
-          <div class="dim">Lens: ${esc(q.lens || "—")} · LensID: ${esc(q.lensid || "—")}</div>
+          <div class="dim">${q.camera ? esc(q.camera) + " · " : ""}Lens: ${esc(q.lens || "—")} · LensID: ${esc(q.lensid || "—")}</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
             ${presets.map((p, i) => `<button class="btn" data-decide="${esc(q.id)}" data-choice="${i}">${esc(p.label)}</button>`).join("")}
             <button class="btn quiet" data-decide="${esc(q.id)}" data-choice="skip">LEAVE AS-IS</button>

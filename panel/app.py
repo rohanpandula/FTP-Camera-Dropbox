@@ -224,7 +224,14 @@ def validate_config(cfg: dict) -> None:
             actions += 1
         if not actions:
             raise ValueError(f"{where}: needs at least one of lens_model / lens_info / set_focal_length")
-        extra = set(r) - {"match_lens", "match_lens_id_regex", "lens_model", "lens_info", "set_focal_length"}
+        for key in ("match_camera", "exclude_camera"):
+            if key in r:
+                v = r[key]
+                if (not isinstance(v, list) or not 1 <= len(v) <= 8
+                        or not all(isinstance(s, str) and 1 <= len(s) <= 64 and s.isprintable() for s in v)):
+                    raise ValueError(f"{where}: {key} needs 1-8 printable strings (substring match on the body name)")
+        extra = set(r) - {"match_lens", "match_lens_id_regex", "lens_model", "lens_info",
+                          "set_focal_length", "match_camera", "exclude_camera"}
         if extra:
             raise ValueError(f"{where}: unknown fields {sorted(extra)}")
 
@@ -758,6 +765,7 @@ def ask_pass():
         sent = tg_call(tg, "sendMessage", {
             "chat_id": tg["chat_id"],
             "text": (f"🔍 Unknown lens on {str(q.get('rel', ''))[:200]}\n"
+                     f"Camera: {str(q.get('camera') or '—')[:80]}\n"
                      f"Lens: {str(q.get('lens', ''))[:120]}\n"
                      f"LensID: {str(q.get('lensid') or '—')[:120]}\n"
                      f"Which glass was this? (auto-closes in {cfg.get('ask_timeout_hours', 12)}h)"),
