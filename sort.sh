@@ -1039,7 +1039,9 @@ massage_nef_lens() {
   lens=${lens%%$'\n'*}
   case "$lens" in
     "35mm f/1.4")
-      if exiftool_write -EXIF:LensMake=SONY "-EXIF:LensModel=FE 35mm F1.4 GM" \
+      # Tag shape mirrors a native Sony body's own files (checked against an
+      # ILCE-7CR original): LensModel + LensInfo only, no LensMake.
+      if exiftool_write "-EXIF:LensModel=FE 35mm F1.4 GM" \
         "-EXIF:LensInfo=35 35 1.4 1.4" "$f"; then
         log "lens: $base -> Sony FE 35mm F1.4 GM"
       else
@@ -1047,7 +1049,7 @@ massage_nef_lens() {
       fi
       ;;
     "50mm f/1.2"|"50mm f/1.3")
-      if exiftool_write -EXIF:LensMake=SONY "-EXIF:LensModel=FE 50mm F1.2 GM" \
+      if exiftool_write "-EXIF:LensModel=FE 50mm F1.2 GM" \
         "-EXIF:LensInfo=50 50 1.2 1.2" "$f"; then
         log "lens: $base -> Sony FE 50mm F1.2 GM"
       else
