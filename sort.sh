@@ -1793,6 +1793,18 @@ prune_stale_raw_tmp() {
     -exec rm -rf -- {} + 2>/dev/null
 }
 
+prune_stale_ftp_tmp() {
+  # pure-ftpd runs with -0 (atomic uploads): an in-flight transfer is a
+  # .pureftpd-upload.* dot-temp that renames to the real name only on success,
+  # so process() never sees partials. pure-ftpd aborts stalled transfers at
+  # ~15 min and cameras re-send whole files (never REST/resume), so an
+  # hour-old temp has no living writer — it is debris from an aborted upload.
+  # Pruned at STUCK_AGE_MIN so debris disappears before the stuck scan below
+  # would flag it. Without -0 this find matches nothing.
+  find "$INCOMING" -type f -name '.pureftpd-upload.*' -mmin +"$STUCK_AGE_MIN" \
+    -exec rm -f -- {} + 2>/dev/null
+}
+
 reconcile() {
   log "reconcile scan"
   # -type f recurses the whole tree: a true dropbox processes files at any depth,
@@ -1803,6 +1815,7 @@ reconcile() {
   done < <(find "$INCOMING" -type f -print0 2>/dev/null)
   wait_for_workers
   prune_stale_raw_tmp
+  prune_stale_ftp_tmp
   find "$INCOMING" -type f -mmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
     log "STUCK >${STUCK_AGE_MIN}min: $(log_name "$f")"
   done
