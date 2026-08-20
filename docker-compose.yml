@@ -156,7 +156,8 @@ services:
           rm -f "$${migration_list}"
         }
 
-        for directory in /data /data/incoming /data/sorted /data/quarantine; do
+        for directory in /data /data/incoming /data/sorted /data/quarantine \
+            /data/.panel; do
           prepare_directory "$${directory}" 0775
         done
         prepare_directory /state 0700
@@ -488,6 +489,37 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  # Optional LAN control panel: status, feature switches, lens rules, watched
+  # folders, library browser, quarantine actions. The pipeline never depends
+  # on it — sort.sh falls back to built-in behavior when /data/.panel/ is
+  # absent. Start with: docker compose --profile panel up -d
+  panel:
+    build: ./panel
+    container_name: dropbox-panel
+    profiles: ["panel"]
+    user: "${PUID:-99}:${PGID:-100}"
+    mem_limit: 512m
+    environment:
+      # Comma-separated Host allowlist (LAN IP / hostname) — DNS-rebinding
+      # protection. Leave unset only on a network you fully trust.
+      PANEL_ALLOWED_HOSTS: ${PANEL_ALLOWED_HOSTS:-}
+      # Keep the dashboard's queue dial pointed at the sorter's real queue.
+      NEF_QUEUE_DIR: ${NEF_QUEUE:-}
+    ports:
+      - "${PANEL_PORT:-8484}:8484"
+    volumes:
+      - ${CAMERA_DATA_SOURCE:-camera_data}:/data
+      # Optional: mount the host healthcheck state dir for the header lamp.
+      # - /var/lib/ftpdropbox-health:/health:ro
+      # Optional: same telegram config as the sorter — enables interactive
+      # lens-decision menus (inline keyboard answers). UI-only without it.
+      # - ./telegram.json:/etc/telegram.json:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
 
 networks:
   camera_net:

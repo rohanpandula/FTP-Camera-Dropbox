@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Dropbox</title>
+<style>
+  :root {
+    /* darkroom / camera-body world */
+    --body: #131110;        /* matte body shell */
+    --plate: #191613;       /* top plate */
+    --raise: #201c18;       /* raised control */
+    --inset: #0e0c0b;       /* input wells */
+    --engrave: #e9e4db;     /* engraved lettering */
+    --halide: #a49c90;      /* secondary silver */
+    --faint: #6f685f;       /* tertiary */
+    --ghost: #4a453e;       /* disabled/placeholder */
+    --safelight: #e6a13c;   /* the one accent */
+    --safelight-dim: rgba(230, 161, 60, .14);
+    --confirm: #6fc06a;     /* viewfinder green */
+    --reject: #d96a57;      /* quarantine red */
+    --hairline: rgba(233, 228, 219, .08);
+    --hairline-strong: rgba(233, 228, 219, .16);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "Helvetica Neue", Inter, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { color-scheme: dark; }
+  body {
+    background: var(--body); color: var(--engrave);
+    font: 14px/1.5 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px 80px; }
+
+  /* ---- header: lamp + wordmark + camera-menu tabs ---- */
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: color-mix(in srgb, var(--body) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .head-row { max-width: 1000px; margin: 0 auto; padding: 14px 20px 0;
+              display: flex; align-items: center; gap: 12px; }
+  .lamp { width: 10px; height: 10px; border-radius: 50%; background: var(--ghost);
+          transition: background .4s, box-shadow .4s; flex: none; }
+  .lamp.ok   { background: var(--confirm); box-shadow: 0 0 10px 1px rgba(111,192,106,.45); }
+  .lamp.fail { background: var(--reject);  box-shadow: 0 0 10px 1px rgba(217,106,87,.5); }
+  .lamp.unknown { background: var(--safelight); box-shadow: 0 0 8px 1px rgba(230,161,60,.4); }
+  .wordmark { font: 600 12px/1 var(--sans); letter-spacing: .22em; }
+  .wordmark small { color: var(--faint); font-weight: 400; letter-spacing: .18em; margin-left: 10px; }
+  .head-note { margin-left: auto; font: 11px var(--mono); color: var(--faint); }
+  nav { max-width: 1000px; margin: 0 auto; padding: 10px 20px 0; display: flex; gap: 2px; overflow-x: auto; }
+  nav button {
+    appearance: none; background: none; border: 0; cursor: pointer;
+    font: 600 11px/1 var(--sans); letter-spacing: .14em; color: var(--faint);
+    padding: 10px 12px 12px; border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  nav button:hover { color: var(--halide); }
+  nav button.on { color: var(--engrave); border-bottom-color: var(--safelight); }
+
+  main { padding-top: 26px; }
+  h2 { font: 600 11px/1 var(--sans); letter-spacing: .18em; color: var(--faint);
+       text-transform: uppercase; margin: 34px 0 14px; }
+  h2:first-child { margin-top: 0; }
+  .sub { color: var(--faint); font-size: 12.5px; margin-top: -8px; margin-bottom: 14px; }
+
+  /* ---- transport readout (no cards — engraved counters) ---- */
+  .readout { display: flex; flex-wrap: wrap; border-block: 1px solid var(--hairline); }
+  .dial { flex: 1 1 120px; padding: 16px 18px; border-right: 1px solid var(--hairline); min-width: 110px; }
+  .dial:last-child { border-right: 0; }
+  .dial b { display: block; font: 500 26px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+  .dial span { font: 600 10px/1 var(--sans); letter-spacing: .16em; color: var(--faint); }
+  .dial .unit { font-size: 13px; color: var(--halide); margin-left: 2px; }
+  .dial.hot b { color: var(--safelight); }
+  .dial.bad b { color: var(--reject); }
+
+  /* ---- contact sheet ---- */
+  .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
+  .frame { background: var(--plate); border: 1px solid var(--hairline); border-radius: 5px;
+           overflow: hidden; cursor: default; }
+  .frame .ph { aspect-ratio: 3/2; background: var(--inset); display: grid; place-items: center;
+               color: var(--ghost); font: 10px var(--mono); letter-spacing: .1em; }
+  .frame img { width: 100%; aspect-ratio: 3/2; object-fit: cover; display: block;
+               filter: saturate(.96); }
+  .frame figcaption { padding: 7px 9px 8px; border-top: 1px solid var(--hairline); }
+  .frame .fn { font: 11px var(--mono); letter-spacing: .02em; overflow: hidden;
+               text-overflow: ellipsis; white-space: nowrap; }
+  .frame .fm { font: 10px var(--mono); color: var(--faint); display: flex;
+               justify-content: space-between; margin-top: 2px; }
+  .badge { font: 9px/1 var(--mono); letter-spacing: .08em; color: var(--halide);
+           border: 1px solid var(--hairline-strong); border-radius: 3px; padding: 2px 4px; }
+
+  /* ---- rows (incoming, quarantine, rules, folders) ---- */
+  .rows { border-top: 1px solid var(--hairline); }
+  .row { display: flex; align-items: center; gap: 8px 14px; padding: 11px 4px;
+         border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .mono, .mono { font: 12.5px var(--mono); font-variant-numeric: tabular-nums; }
+  .row .dim { color: var(--faint); font: 11.5px var(--mono); }
+  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arrow { color: var(--safelight); padding: 0 2px; }
+
+  /* ---- top-plate switch ---- */
+  .switchrow { display: flex; align-items: flex-start; gap: 16px; padding: 16px 4px;
+               border-bottom: 1px solid var(--hairline); }
+  .switchrow:first-of-type { border-top: 1px solid var(--hairline); }
+  .switchrow .label { font: 600 12px/1.3 var(--sans); letter-spacing: .04em; }
+  .switchrow .desc { color: var(--faint); font-size: 12px; margin-top: 3px; max-width: 60ch; }
+  .sw { margin-left: auto; flex: none; position: relative; width: 58px; height: 26px;
+        border-radius: 13px; border: 1px solid var(--hairline-strong); background: var(--inset);
+        cursor: pointer; transition: background .18s, border-color .18s; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+               border-radius: 50%; background: var(--halide); transition: left .18s, background .18s; }
+  .sw::before { content: "OFF"; position: absolute; right: 7px; top: 6px;
+                font: 600 8px/1.2 var(--mono); letter-spacing: .08em; color: var(--ghost); }
+  .sw.on { background: var(--safelight-dim); border-color: var(--safelight); }
+  .sw.on::after { left: 35px; background: var(--safelight); }
+  .sw.on::before { content: "ON"; left: 9px; right: auto; color: var(--safelight); }
+  .sw.busy { opacity: .5; pointer-events: none; }
+
+  /* ---- controls ---- */
+  input[type=text] {
+    background: var(--inset); border: 1px solid var(--hairline-strong); border-radius: 5px;
+    color: var(--engrave); font: 12.5px var(--mono); padding: 8px 10px; width: 100%;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--safelight); }
+  input::placeholder { color: var(--ghost); }
+  .btn {
+    appearance: none; cursor: pointer; border-radius: 5px; white-space: nowrap;
+    border: 1px solid var(--hairline-strong); background: var(--raise); color: var(--engrave);
+    font: 600 11px/1 var(--sans); letter-spacing: .1em; padding: 9px 14px;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .btn:hover { border-color: var(--safelight); color: var(--safelight); }
+  .btn.danger:hover { border-color: var(--reject); color: var(--reject); }
+  .btn.quiet { border-color: transparent; background: none; color: var(--faint); padding: 6px 8px; }
+  .btn.quiet:hover { color: var(--engrave); border-color: var(--hairline-strong); }
+  .btn:disabled { opacity: .45; pointer-events: none; }
+
+  /* rule engraving */
+  .engraving { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .engraving .m { color: var(--halide); }
+  .field-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 12px; align-items: center;
+                padding: 14px; background: var(--plate); border: 1px solid var(--hairline);
+                border-radius: 5px; margin-top: 12px; }
+  .field-grid label { font: 600 10px/1.2 var(--sans); letter-spacing: .12em; color: var(--faint); }
+  .form-foot { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+
+  .empty { color: var(--faint); font: 12.5px var(--mono); padding: 26px 4px; text-align: center;
+           border-block: 1px solid var(--hairline); }
+  .hint { color: var(--ghost); font-size: 11.5px; margin-top: 8px; }
+
+  /* library day grid */
+  .daylist .row { cursor: pointer; }
+  .daylist .row:hover { background: var(--plate); }
+  .crumb { color: var(--safelight); cursor: pointer; font: 12px var(--mono); }
+
+  /* toast */
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(6px);
+           background: var(--raise); border: 1px solid var(--hairline-strong); border-radius: 6px;
+           color: var(--engrave); font: 12px var(--mono); padding: 10px 16px; opacity: 0;
+           pointer-events: none; transition: opacity .2s, transform .2s; max-width: 80vw; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.bad { border-color: var(--reject); color: var(--reject); }
+
+  @media (max-width: 560px) {
+    .dial { padding: 12px 12px; }
+    .dial b { font-size: 20px; }
+    .field-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="head-row">
+    <div class="lamp unknown" id="lamp" title="pipeline health"></div>
+    <div class="wordmark">CAMERA&nbsp;DROPBOX<small id="headnote">—</small></div>
+    <div class="head-note" id="clock"></div>
+  </div>
+  <nav id="tabs"></nav>
+</header>
+<div class="wrap"><main id="view"></main></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (sel, el=document) => el.querySelector(sel);
+const TABS = [
+  ["overview",   "OVERVIEW"],
+  ["switches",   "SWITCHES"],
+  ["rules",      "LENS RULES"],
+  ["decisions",  "DECISIONS"],
+  ["folders",    "FOLDERS"],
+  ["quarantine", "QUARANTINE"],
+];
+let tab = location.hash.slice(1) || "overview";
+let config = null;
+let pollTimer = null;
+
+/* ---------- plumbing ---------- */
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const isJson = (r.headers.get("content-type") || "").includes("json");
+  const body = isJson ? await r.json() : null;
+  if (!r.ok) throw new Error((body && body.error) || `HTTP ${r.status}`);
+  return body;
+}
+function toast(msg, bad=false) {
+  const t = $("#toast");
+  t.textContent = msg; t.classList.toggle("bad", bad); t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function bytes(n) {
+  if (n == null) return "—";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
+  return n.toFixed(n >= 100 || i === 0 ? 0 : 1) + " " + u[i];
+}
+function age(s) {
+  if (s < 90) return s + "s";
+  if (s < 5400) return Math.round(s/60) + "m";
+  if (s < 129600) return Math.round(s/3600) + "h";
+  return Math.round(s/86400) + "d";
+}
+const hm = ts => new Date(ts*1000).toTimeString().slice(0,5);
+
+/* ---------- header / tabs ---------- */
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.map(([id, label]) =>
+    `<button class="${id===tab?"on":""}" onclick="go('${id}')">${label}</button>`).join("");
+}
+function go(t) { tab = t; location.hash = t; renderTabs(); render(); }
+window.addEventListener("hashchange", () => {
+  const t = location.hash.slice(1);
+  if (t && t !== tab && TABS.some(([id]) => id === t)) go(t);
+});
+setInterval(() => { $("#clock").textContent = new Date().toTimeString().slice(0,8); }, 1000);
+
+/* ---------- overview ---------- */
+async function renderOverview() {
+  const view = $("#view");
+  view.innerHTML = `<h2>Transport</h2><div id="readout" class="empty">reading…</div>
+    <div id="incoming"></div>
+    <h2>Latest frames</h2><div id="sheet" class="empty">reading…</div>`;
+  await refreshOverview();
+}
+async function refreshOverview() {
+  if (tab !== "overview" || document.hidden) return;
+  try {
+    const [s, r] = await Promise.all([api("/api/status"), api("/api/recent?limit=18")]);
+    const lamp = $("#lamp");
+    lamp.className = "lamp " + s.health.state;
+    lamp.title = s.health.state === "ok" ? "pipeline healthy"
+               : s.health.state === "fail" ? s.health.detail : "healthcheck not mounted";
+    $("#headnote").textContent = s.health.state === "ok" ? "ALL SYSTEMS"
+               : s.health.state === "fail" ? "ATTENTION" : "PANEL ONLY";
+    const freePct = Math.round(100 * s.disk.free / s.disk.total);
+    const inbound = s.incoming.length + s.receiving;
+    $("#readout").outerHTML = `<div class="readout" id="readout">
+      <div class="dial ${inbound ? "hot" : ""}"><b>${inbound}</b><span>INCOMING</span></div>
+      <div class="dial"><b>${s.counts.sorted_today}</b><span>SORTED TODAY</span></div>
+      <div class="dial"><b>${s.counts.queue_depth}</b><span>RENDER QUEUE</span></div>
+      <div class="dial ${s.counts.quarantine_total ? "bad" : ""}"><b>${s.counts.quarantine_total}</b><span>QUARANTINE</span></div>
+      ${s.counts.pending_decisions ? `<div class="dial hot"><b>${s.counts.pending_decisions}</b><span>DECISIONS</span></div>` : ""}
+      <div class="dial"><b>${bytes(s.disk.free)}<span class="unit">free</span></b><span>DISK ${freePct}%</span></div>
+    </div>`;
+    const inc = $("#incoming");
+    if (inbound) {
+      inc.innerHTML = `<h2>On the wire</h2><div class="rows">` +
+        (s.receiving ? `<div class="row"><span class="mono" style="color:var(--safelight)">▸ ${s.receiving} transfer${s.receiving>1?"s":""} receiving…</span></div>` : "") +
+        s.incoming.map(f => `<div class="row"><span class="mono grow name">${esc(f.name)}</span>
+           <span class="dim">${bytes(f.size)}</span><span class="dim">${age(f.age_s)} old</span></div>`).join("") +
+        `</div>`;
+    } else inc.innerHTML = "";
+    const files = r.files;
+    $("#sheet").outerHTML = files.length ? `<figure class="sheet" id="sheet">` + files.map(f => {
+      const canThumb = /\.(nef|arw|raf|dng|nrw|jpe?g|tiff?)$/i.test(f.name);
+      return `<figure class="frame">
+        ${canThumb ? `<img loading="lazy" src="/api/thumb?f=${encodeURIComponent(f.rel)}"
+                        onerror="this.outerHTML='<div class=ph>NO PREVIEW</div>'">`
+                   : `<div class="ph">${esc(f.type.toUpperCase())}</div>`}
+        <figcaption><div class="fn">${esc(f.name)}</div>
+        <div class="fm"><span>${hm(f.mtime)}</span><span class="badge">${esc(f.type)}</span></div></figcaption>
+      </figure>`; }).join("") + `</figure>`
+      : `<div class="empty" id="sheet">No frames yet — the strip is blank.</div>`;
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- switches ---------- */
+const SWITCHES = [
+  ["lens_massage", "Lens identity fix",
+   "Rewrite adapted-glass EXIF on new NEFs so Lightroom names the real lens (rules on the Lens Rules tab)."],
+  ["nef_render_queue", "Recipe TIFF renders",
+   "Hard-link new NEFs to the render queue; nef-watch drops a recipe-look TIFF next to each raw."],
+  ["telegram_notifications", "Telegram notifications",
+   "Sort and quarantine digests to your phone. Off = dropped silently, pipeline unaffected."],
+  ["watch_funnel", "Watched-folder funnel",
+   "Sweep extra folders (Folders tab) into incoming/ for normal sorting."],
+  ["ask_on_unknown", "Ask on unknown glass",
+   "When no lens rule matches non-Nikkor glass, ask via Telegram + Decisions tab; unanswered questions auto-close with no changes."],
+];
+function warnInvalid() {
+  if (config && config._invalid) toast("config file on disk was invalid — showing defaults; saving rewrites it", true);
+}
+async function renderSwitches() {
+  config = await api("/api/config");
+  warnInvalid();
+  $("#view").innerHTML = `<h2>Top plate</h2>
+    <p class="sub">Take effect on the next file — no restarts. sort.sh reads this live.</p>` +
+    SWITCHES.map(([key, label, desc]) => `
+      <div class="switchrow">
+        <div><div class="label">${label}</div><div class="desc">${desc}</div></div>
+        <div class="sw ${config.features[key] !== false ? "on" : ""}" id="sw-${key}"
+             role="switch" tabindex="0" onclick="flip('${key}')"
+             onkeydown="if(event.key==' '||event.key==='Enter'){event.preventDefault();flip('${key}')}"></div>
+      </div>`).join("");
+}
+async function flip(key) {
+  const el = $("#sw-" + key);
+  el.classList.add("busy");
+  try {
+    // Send only the flipped key — the server merges per-key, so two quick
+    // toggles can't overwrite each other.
+    config = await api("/api/config", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ features: { [key]: !(config.features[key] !== false) } }) });
+    el.classList.toggle("on", config.features[key] !== false);
+    toast(`${key.replaceAll("_", " ")} ${config.features[key] !== false ? "ON" : "OFF"}`);
+  } catch (e) { toast(e.message, true); }
+  el.classList.remove("busy");
+}
+
+/* ---------- lens rules ---------- */
+async function renderRules() {
+  config = await api("/api/config");
+  warnInvalid();
+  const rules = config.lens_rules;
+  $("#view").innerHTML = `<h2>Lens registry</h2>
+    <p class="sub">First matching rule wins, keyed on the EXIF <span class="mono">Lens</span> signature.
+    Identity tags only — exposure is never touched.</p>
+    <div class="rows">` + (rules.length ? rules.map((r, i) => `
+      <div class="row">
+        <div class="grow engraving mono">
+          <span>${r.match_lens.map(esc).join(" · ")}</span>
+          ${r.match_lens_id_regex ? `<span class="m">id~${esc(r.match_lens_id_regex)}</span>` : ""}
+          <span class="arrow">→</span>
+          <span>${esc(r.lens_model || (r.set_focal_length ? r.set_focal_length + "mm focal" : ""))}</span>
+          ${r.lens_info ? `<span class="m">[${esc(r.lens_info)}]</span>` : ""}
+        </div>
+        <button class="btn quiet" onclick="editRule(${i})">EDIT</button>
+        <button class="btn quiet" onclick="deleteRule(${i})">DELETE</button>
+      </div>`).join("") : `<div class="empty">No rules — NEFs pass through untouched.</div>`) +
+    `</div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="editRule(-1)">ADD RULE</button>
+    </div>
+    <div id="ruleform"></div>
+    <h2>Test a signature</h2>
+    <p class="sub">Paste a <span class="mono">Lens</span> value (e.g. <span class="mono">50mm f/1.3</span>) to see which rule fires.</p>
+    <input type="text" id="probe" placeholder="50mm f/1.3" oninput="probeRule(this.value)">
+    <div class="hint mono" id="proberesult"></div>`;
+}
+function probeRule(v) {
+  const out = $("#proberesult");
+  if (!v.trim()) { out.textContent = ""; return; }
+  const hit = config.lens_rules.find(r => r.match_lens.includes(v.trim()));
+  out.textContent = hit
+    ? `→ ${hit.lens_model || hit.set_focal_length + "mm"}${hit.match_lens_id_regex ? "  (if LensID ~ " + hit.match_lens_id_regex + ")" : ""}`
+    : "no rule matches — file passes through untouched";
+  out.style.color = hit ? "var(--safelight)" : "var(--faint)";
+}
+function editRule(i) {
+  const r = i >= 0 ? config.lens_rules[i] : {};
+  $("#ruleform").innerHTML = `<div class="field-grid">
+    <label>MATCH LENS (comma-sep)</label><input type="text" id="f-match" value="${esc((r.match_lens||[]).join(", "))}" placeholder="50mm f/1.2, 50mm f/1.3">
+    <label>LENSID REGEX (optional)<div class="hint" style="margin-top:3px">POSIX ERE — \d and (?:…) won't work</div></label><input type="text" id="f-regex" value="${esc(r.match_lens_id_regex||"")}" placeholder="Leica.*35">
+    <label>SET LENS MODEL</label><input type="text" id="f-model" value="${esc(r.lens_model||"")}" placeholder="FE 50mm F1.2 GM">
+    <label>SET LENS INFO</label><input type="text" id="f-info" value="${esc(r.lens_info||"")}" placeholder="50 50 1.2 1.2">
+    <label>SET FOCAL LENGTH</label><input type="text" id="f-focal" value="${esc(r.set_focal_length||"")}" placeholder="35">
+    <div class="form-foot">
+      <button class="btn quiet" onclick="$('#ruleform').innerHTML=''">CANCEL</button>
+      <button class="btn" onclick="saveRule(${i})">SAVE RULE</button>
+    </div></div>`;
+  $("#f-match").focus();
+}
+async function saveRule(i) {
+  const rule = {};
+  const match = $("#f-match").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (match.length) rule.match_lens = match;
+  const rx = $("#f-regex").value.trim(); if (rx) rule.match_lens_id_regex = rx;
+  const model = $("#f-model").value.trim(); if (model) rule.lens_model = model;
+  const info = $("#f-info").value.trim(); if (info) rule.lens_info = info;
+  const focal = $("#f-focal").value.trim(); if (focal) rule.set_focal_length = focal;
+  const rules = [...config.lens_rules];
+  if (i >= 0) rules[i] = rule; else rules.push(rule);
+  try {
+    config = await api("/api/config", { method: "PUT",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ lens_rules: rules }) });
+    toast("lens registry updated");
+    renderRules();
+  } catch (e) { toast(e.message, true); }
+}
+async function deleteRule(i) {
+  const rules = config.lens_rules.filter((_, n) => n !== i);
+  try {
+    config = await api("/api/config", { method: "PUT",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ lens_rules: rules }) });
+    toast("rule deleted");
+    renderRules();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- decisions ---------- */
+async function renderDecisions() {
+  const [d, cfg] = await Promise.all([api("/api/decisions"), api("/api/config")]);
+  config = cfg;
+  const presets = cfg.lens_presets || [];
+  $("#view").innerHTML = `<h2>Lens decisions</h2>
+    <p class="sub">Glass the rules didn't recognize. Answer here or on Telegram —
+    unanswered questions auto-close after ${esc(String(cfg.ask_timeout_hours))}h with no changes.</p>
+    <div class="rows">` + (d.pending.length ? d.pending.map(q => `
+      <div class="row" style="align-items:flex-start">
+        <img loading="lazy" src="/api/thumb?f=${encodeURIComponent(q.rel)}"
+             style="width:96px;aspect-ratio:3/2;object-fit:cover;border-radius:4px;border:1px solid var(--hairline)"
+             onerror="this.style.display='none'">
+        <div class="grow">
+          <div class="mono name">${esc(q.rel)}</div>
+          <div class="dim">Lens: ${esc(q.lens || "—")} · LensID: ${esc(q.lensid || "—")}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+            ${presets.map((p, i) => `<button class="btn" data-decide="${esc(q.id)}" data-choice="${i}">${esc(p.label)}</button>`).join("")}
+            <button class="btn quiet" data-decide="${esc(q.id)}" data-choice="skip">LEAVE AS-IS</button>
+          </div>
+        </div>
+      </div>`).join("") : `<div class="empty">No open questions — every lens accounted for.</div>`) + `</div>` +
+    (d.resolved.length ? `<h2>Recently answered</h2><div class="rows">` + d.resolved.map(q => `
+      <div class="row"><span class="mono grow name">${esc(q.rel || "?")}</span>
+        <span class="dim">${esc(q.outcome || "")} · ${esc(q.via || "")}</span></div>`).join("") + `</div>` : "");
+}
+$("#view").addEventListener("click", async e => {
+  const btn = e.target.closest("[data-decide]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const r = await api("/api/decision", { method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ id: btn.dataset.decide, choice: btn.dataset.choice }) });
+    toast(r.outcome);
+    renderDecisions();
+  } catch (err2) { toast(err2.message, true); btn.disabled = false; }
+});
+
+/* ---------- folders ---------- */
+async function renderFolders() {
+  const [cfg, lib] = await Promise.all([api("/api/config"), api("/api/library")]);
+  config = cfg;
+  warnInvalid();
+  $("#view").innerHTML = `<h2>Watched folders</h2>
+    <p class="sub">Anything dropped here is swept into <span class="mono">incoming/</span> once it sits still for a minute,
+    then sorted like any upload. Paths live under <span class="mono">/data</span>.</p>
+    <div class="rows">` + (cfg.watched_folders.length ? cfg.watched_folders.map((p, i) => `
+      <div class="row"><span class="mono grow name">${esc(p)}</span>
+        <button class="btn quiet" onclick="removeFolder(${i})">REMOVE</button></div>`).join("")
+      : `<div class="empty">No extra folders — only incoming/ is watched.</div>`) + `</div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <input type="text" id="f-folder" placeholder="/data/drop-here" style="max-width:340px">
+      <button class="btn" onclick="addFolder()">WATCH</button>
+    </div>
+    <h2>Library</h2><div class="daylist" id="daylist"><div class="rows">` +
+    (lib.days.length ? lib.days.map(d => `
+      <div class="row" onclick="renderDay('${d.date}')">
+        <span class="mono grow">${d.date}</span>
+        <span class="dim">${Object.entries(d.types).map(([t,n]) => `${t} ${n}`).join(" · ") || "empty"}</span>
+        <span class="mono" style="color:var(--halide)">${d.total}</span></div>`).join("")
+      : `<div class="empty">Library is empty.</div>`) + `</div></div>`;
+}
+async function addFolder() {
+  const p = $("#f-folder").value.trim();
+  if (!p) return;
+  try {
+    config = await api("/api/config", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ watched_folders: [...config.watched_folders, p] }) });
+    toast("watching " + p);
+    renderFolders();
+  } catch (e) { toast(e.message, true); }
+}
+async function removeFolder(i) {
+  try {
+    config = await api("/api/config", { method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ watched_folders: config.watched_folders.filter((_, n) => n !== i) }) });
+    toast("folder removed");
+    renderFolders();
+  } catch (e) { toast(e.message, true); }
+}
+async function renderDay(date) {
+  const d = await api("/api/library/" + date);
+  $("#view").innerHTML = `<h2><span class="crumb" onclick="renderFolders()">LIBRARY</span>
+      <span style="color:var(--ghost)"> / </span>${date}</h2>
+    <div class="sheet">` + d.files.map(f => {
+      const canThumb = /\.(nef|arw|raf|dng|nrw|jpe?g|tiff?)$/i.test(f.name);
+      return `<figure class="frame">
+        ${canThumb ? `<img loading="lazy" src="/api/thumb?f=${encodeURIComponent(f.rel)}"
+                        onerror="this.outerHTML='<div class=ph>NO PREVIEW</div>'">`
+                   : `<div class="ph">${esc(f.type.toUpperCase())}</div>`}
+        <figcaption><div class="fn">${esc(f.name)}</div>
+          <div class="fm"><span>${bytes(f.size)}</span><span class="badge">${esc(f.type)}</span></div>
+        </figcaption></figure>`;
+    }).join("") + `</div>`;
+}
+
+/* ---------- quarantine ---------- */
+async function renderQuarantine() {
+  const q = await api("/api/quarantine");
+  const active = q.files.filter(f => !f.rel.startsWith("_trash/"));
+  const trash = q.files.length - active.length;
+  $("#view").innerHTML = `<h2>Rejects bin</h2>
+    <p class="sub">RETRY re-runs full validation via <span class="mono">incoming/</span>;
+    TRASH stages to <span class="mono">_trash/</span> (delete it whenever).${trash ? ` <span class="mono">${trash} staged in _trash.</span>` : ""}</p>
+    <div class="rows">` + (active.length ? active.map(f => `
+      <div class="row">
+        <span class="mono grow name">${esc(f.rel)}</span>
+        <span class="dim">${bytes(f.size)}</span>
+        <button class="btn" data-qact="retry" data-rel="${esc(f.rel)}">RETRY</button>
+        <button class="btn danger" data-qact="trash" data-armed="0" data-rel="${esc(f.rel)}">TRASH</button>
+      </div>`).join("") : `<div class="empty">Nothing in quarantine — the bin is clean.</div>`) + `</div>`;
+}
+async function quarAct(rel, action, btn) {
+  btn.disabled = true;
+  try {
+    const r = await api("/api/quarantine/action", { method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ rel, action }) });
+    toast(`${action}: → ${r.moved_to}`);
+    renderQuarantine();
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+// Delegated: rel paths come from filenames — never inline them into JS strings.
+$("#view").addEventListener("click", e => {
+  const btn = e.target.closest("[data-qact]");
+  if (!btn) return;
+  const rel = btn.dataset.rel;
+  if (btn.dataset.qact === "retry") { quarAct(rel, "retry", btn); return; }
+  if (btn.dataset.armed === "1") { quarAct(rel, "trash", btn); return; }
+  btn.dataset.armed = "1"; btn.textContent = "SURE?";
+  setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = "0"; btn.textContent = "TRASH"; } }, 3000);
+});
+
+/* ---------- router ---------- */
+async function render() {
+  clearInterval(pollTimer);
+  try {
+    if (tab === "overview") {
+      await renderOverview();
+      pollTimer = setInterval(refreshOverview, 8000);
+    }
+    else if (tab === "switches") await renderSwitches();
+    else if (tab === "rules") await renderRules();
+    else if (tab === "decisions") await renderDecisions();
+    else if (tab === "folders") await renderFolders();
+    else if (tab === "quarantine") await renderQuarantine();
+  } catch (e) {
+    $("#view").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+renderTabs();
+render();
+</script>
+</body>
+</html>
