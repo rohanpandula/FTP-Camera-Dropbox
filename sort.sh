@@ -46,6 +46,7 @@ RAW_VALIDATE_TMPDIR="${RAW_VALIDATE_TMPDIR:-}"
 RAW_VALIDATE_TMP_STALE_MIN="${RAW_VALIDATE_TMP_STALE_MIN:-15}"
 NEF_LENS_MASSAGE="${NEF_LENS_MASSAGE:-0}"   # rewrite adapted-lens identity tags on sorted NEFs
 NEF_QUEUE="${NEF_QUEUE:-}"                  # hard-link sorted NEFs here for the nef-watch renderer; empty disables
+PANEL_CONFIG="${PANEL_CONFIG:-/data/.panel/config.json}"  # optional control-panel config; absent = current behavior
 
 log_value() {
   local value=$1
@@ -642,6 +643,9 @@ fi
 telegram_send() {
   local text=$1
   (( TELEGRAM_ENABLED )) || { log "telegram: no credentials, skipping"; return 1; }
+  # Panel kill switch. Returning success keeps queue-flush logic draining
+  # normally — messages are dropped, not retried forever.
+  panel_flag telegram_notifications || return 0
   local resp http_code
   resp=$(curl -sS -m 15 -w '\n%{http_code}' -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${TG_CHAT_ID}" \
@@ -1026,35 +1030,104 @@ exiftool_write() {
   timeout "$RAW_VALIDATE_TIMEOUT" exiftool -q -q -overwrite_original "$@" 2>/dev/null
 }
 
+panel_flag() {
+  # panel_flag <feature> -> 0 when enabled. The panel writes config.json
+  # atomically (tmp + rename), so jq always parses a complete file. A missing,
+  # corrupt, or hand-mangled config fails OPEN to current behavior — the
+  # pipeline must never depend on the panel existing.
+  local name=$1 v
+  [[ -f "$PANEL_CONFIG" ]] || return 0
+  # No `//` anywhere in this filter: jq's alternative operator treats false
+  # like null, which would turn every OFF switch back into ON. `?` alone
+  # suppresses type errors (non-object features -> null -> "on").
+  v=$(jq -r --arg k "$name" \
+    'if .features[$k]? == false then "off" else "on" end' \
+    "$PANEL_CONFIG" 2>/dev/null) || return 0
+  [[ "$v" != "off" ]]
+}
+
+apply_lens_writes() {
+  # Build the exiftool arg list from rule fields, re-validating shape here so
+  # a mangled config can never smuggle arbitrary exiftool switches: every
+  # value lands AFTER a fixed "-TAG=" prefix and must match a tight charset.
+  # Identity tags only — FNumber/exposure are never written.
+  local f=$1 base=$2 model=$3 info=$4 focal=$5
+  local model_re='^[A-Za-z0-9][A-Za-z0-9 ./-]{0,62}$'
+  local info_re='^[0-9][0-9. ]{0,30}$'
+  local focal_re='^[0-9]{1,4}(\.[0-9])?$'
+  local -a args=()
+  if [[ -n "$model" && "$model" =~ $model_re ]]; then
+    args+=("-EXIF:LensModel=$model")
+  fi
+  if [[ -n "$info" && "$info" =~ $info_re ]]; then
+    args+=("-EXIF:LensInfo=$info")
+  fi
+  if [[ -n "$focal" && "$focal" =~ $focal_re ]]; then
+    args+=("-EXIF:FocalLength=$focal" "-EXIF:FocalLengthIn35mmFormat=$focal")
+  fi
+  (( ${#args[@]} )) || return 0
+  if exiftool_write "${args[@]}" "$f"; then
+    log "lens: $base -> ${model:-focal ${focal}mm}"
+  else
+    log "lens massage failed (kept original tags): $base"
+  fi
+}
+
 massage_nef_lens() {
   # Sony glass adapted onto the Nikon Zf reports its identity wrong — either
-  # a bare focal/aperture pair or the adapter's alias (Samyang VAF / Laowa
+  # a bare focal/aperture pair or the adapter's alias (Samyang VAF / Megadap
   # strings for what is physically a GM). Rewrite lens IDENTITY tags only,
-  # never FNumber/exposure, so Lightroom names the real lens. Matching keys
-  # off the Lens signature: owned native glass (Z 40/2, Z 50/1.4) matches no
-  # case and is never touched. Runs post-move on the sorted copy — a failed
-  # write leaves a valid, unmassaged file.
-  local f=$1 base=$2 lens lensid
+  # never FNumber/exposure, so Lightroom names the real lens. Tag shape
+  # mirrors a native Sony body's own files (LensModel + LensInfo, no
+  # LensMake). Runs post-move on the sorted copy — a failed write leaves a
+  # valid, unmassaged file.
+  #
+  # Rules come from the panel config when present (matched on the Lens
+  # signature, first hit wins); the built-in case below is the fallback when
+  # no config exists, so the pipeline works identically without the panel.
+  local f=$1 base=$2 lens lensid rule idre
+  panel_flag lens_massage || return 0
   lens=$(exiftool_read -Lens -s3 "$f") || lens=""
   lens=${lens%%$'\n'*}
+  [[ -n "$lens" ]] || return 0
+
+  if [[ -f "$PANEL_CONFIG" ]]; then
+    rule=$(jq -c --arg lens "$lens" \
+      '[.lens_rules[]? | select((.match_lens | type) == "array" and (.match_lens | index($lens)))][0] // empty' \
+      "$PANEL_CONFIG" 2>/dev/null) || rule=""
+    if [[ -n "$rule" ]]; then
+      idre=$(jq -r '.match_lens_id_regex // empty' <<<"$rule" 2>/dev/null) || idre=""
+      if [[ -n "$idre" ]]; then
+        lensid=$(exiftool_read -LensID -s3 "$f") || lensid=""
+        lensid=${lensid%%$'\n'*}
+        # User regex meets camera-supplied input: cap the subject and bound
+        # the match with a timeout so a pathological ERE can't wedge a sort
+        # worker (this is the one spot user config drives a regex engine).
+        # Invalid regex, no match, or timeout all skip the rule safely.
+        lensid=${lensid:0:64}
+        timeout 1 bash -c '[[ "$1" =~ $2 ]]' _ "$lensid" "$idre" 2>/dev/null || return 0
+      fi
+      apply_lens_writes "$f" "$base" \
+        "$(jq -r '.lens_model // empty' <<<"$rule" 2>/dev/null)" \
+        "$(jq -r '.lens_info // empty' <<<"$rule" 2>/dev/null)" \
+        "$(jq -r '.set_focal_length // empty | tostring' <<<"$rule" 2>/dev/null)"
+      return 0
+    fi
+    # A parseable config with no matching rule is authoritative: no fallback,
+    # so deleting a rule in the panel really turns that rewrite off. Unknown
+    # non-native glass gets queued for an interactive decision instead.
+    if jq -e '.lens_rules | type == "array"' "$PANEL_CONFIG" >/dev/null 2>&1; then
+      queue_lens_question "$f" "$base" "$lens"
+      return 0
+    fi
+  fi
+
   case "$lens" in
     "35mm f/1.4")
-      # Tag shape mirrors a native Sony body's own files (checked against an
-      # ILCE-7CR original): LensModel + LensInfo only, no LensMake.
-      if exiftool_write "-EXIF:LensModel=FE 35mm F1.4 GM" \
-        "-EXIF:LensInfo=35 35 1.4 1.4" "$f"; then
-        log "lens: $base -> Sony FE 35mm F1.4 GM"
-      else
-        log "lens massage failed (kept original tags): $base"
-      fi
+      apply_lens_writes "$f" "$base" "FE 35mm F1.4 GM" "35 35 1.4 1.4" ""
       ;;
     "50mm f/1.2"|"50mm f/1.3")
-      if exiftool_write "-EXIF:LensModel=FE 50mm F1.2 GM" \
-        "-EXIF:LensInfo=50 50 1.2 1.2" "$f"; then
-        log "lens: $base -> Sony FE 50mm F1.2 GM"
-      else
-        log "lens massage failed (kept original tags): $base"
-      fi
+      apply_lens_writes "$f" "$base" "FE 50mm F1.2 GM" "50 50 1.2 1.2" ""
       ;;
     "0mm f/0")
       # Fully-manual adapted glass. The Zf menu's non-CPU focal length is not
@@ -1062,15 +1135,43 @@ massage_nef_lens() {
       lensid=$(exiftool_read -LensID -s3 "$f") || lensid=""
       case "$lensid" in
         *Leica*35*|*Summicron*35*)
-          if exiftool_write -EXIF:FocalLength=35 -EXIF:FocalLengthIn35mmFormat=35 "$f"; then
-            log "lens: $base focal length -> 35mm (manual Leica)"
-          else
-            log "lens massage failed (kept original tags): $base"
-          fi
+          apply_lens_writes "$f" "$base" "" "" "35"
           ;;
       esac
       ;;
   esac
+  return 0
+}
+
+queue_lens_question() {
+  # Unmatched, non-native glass (dumb M-mount adapters report nothing; smart
+  # E-mount adapters sometimes report their own name): hand the decision to
+  # the panel, which asks over Telegram with an inline lens menu and applies
+  # the answer — or leaves the file untouched after the configured timeout.
+  # Native NIKKOR glass never asks. The file is already sorted; this never
+  # blocks or delays the pipeline.
+  local f=$1 base=$2 lens=$3 lensid pending id
+  panel_flag ask_on_unknown || return 0
+  lensid=$(exiftool_read -LensID -s3 "$f") || lensid=""
+  lensid=${lensid%%$'\n'*}
+  case "$lensid" in *NIKKOR*|*Nikkor*) return 0 ;; esac
+  # Camera-supplied strings: strip control chars and cap length (same
+  # treatment as every other EXIF string here) so an oversized value can't
+  # wedge the panel's Telegram send into a retry loop.
+  lens=$(sanitize "$lens")
+  lensid=$(sanitize "$lensid")
+  pending="${PANEL_CONFIG%/*}/pending"
+  mkdir -p "$pending" 2>/dev/null || return 0
+  id=$(printf '%s' "$f" | sha256sum | cut -c1-16)
+  if jq -n --arg rel "${f#"$SORTED"/}" --arg lens "$lens" --arg lensid "$lensid" \
+       --arg ts "$(date +%s)" \
+       '{rel: $rel, lens: $lens, lensid: $lensid, ts: ($ts | tonumber)}' \
+       > "$pending/.tmp.$id" 2>/dev/null \
+     && mv -f -- "$pending/.tmp.$id" "$pending/$id.json" 2>/dev/null; then
+    log "lens: unknown signature '$(log_value "$lens")' — queued decision for panel: $base"
+  else
+    rm -f -- "$pending/.tmp.$id" 2>/dev/null
+  fi
   return 0
 }
 
@@ -1082,6 +1183,7 @@ queue_nef_for_render() {
   # the historical library never re-renders.
   local f=$1 relative=$2 base=$3
   [[ -n "$NEF_QUEUE" ]] || return 0
+  panel_flag nef_render_queue || return 0
   if mkdir -p "$NEF_QUEUE/$relative" 2>/dev/null \
     && ln -f "$f" "$NEF_QUEUE/$relative/$base" 2>/dev/null; then
     :
@@ -1834,7 +1936,11 @@ start_inotify_watcher() {
     return 1
   }
 
-  exec 3< <(inotifywait -m -r -q -e close_write -e moved_to --format '%w%f' \
+  # `create` too: the panel's no-clobber funnel enters files as hard links
+  # (link+unlink), which emit CREATE, not MOVED_TO — without it those files
+  # sit until the next reconcile. Early CREATEs for in-progress writes are
+  # harmless: wait_stable holds them until the size settles.
+  exec 3< <(inotifywait -m -r -q -e close_write -e moved_to -e create --format '%w%f' \
     "$watch_root" "$WATCH_PROBE_DIR")
   INOTIFY_PID=$!
 
