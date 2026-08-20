@@ -1085,15 +1085,26 @@ massage_nef_lens() {
   # Rules come from the panel config when present (matched on the Lens
   # signature, first hit wins); the built-in case below is the fallback when
   # no config exists, so the pipeline works identically without the panel.
-  local f=$1 base=$2 lens lensid rule idre
+  # Rules may scope to camera bodies: match_camera includes (any entry a
+  # case-insensitive substring of the body name), exclude_camera carves out
+  # of that set; both may combine. Camera comes from the caller's already-
+  # sanitized get_camera value — no extra EXIF read.
+  local f=$1 base=$2 camera=${3:-} lens lensid rule idre
   panel_flag lens_massage || return 0
   lens=$(exiftool_read -Lens -s3 "$f") || lens=""
   lens=${lens%%$'\n'*}
   [[ -n "$lens" ]] || return 0
 
   if [[ -f "$PANEL_CONFIG" ]]; then
-    rule=$(jq -c --arg lens "$lens" \
-      '[.lens_rules[]? | select((.match_lens | type) == "array" and (.match_lens | index($lens)))][0] // empty' \
+    rule=$(jq -c --arg lens "$lens" --arg cam "$camera" '
+      ($cam | ascii_downcase) as $c |
+      [.lens_rules[]? | select(
+        (.match_lens | type) == "array" and (.match_lens | index($lens))
+        and (((.match_camera? // null) | type) != "array"
+             or any(.match_camera[]? | strings; . as $m | $c | contains($m | ascii_downcase)))
+        and (((.exclude_camera? // null) | type) != "array"
+             or (any(.exclude_camera[]? | strings; . as $m | $c | contains($m | ascii_downcase)) | not))
+      )][0] // empty' \
       "$PANEL_CONFIG" 2>/dev/null) || rule=""
     if [[ -n "$rule" ]]; then
       idre=$(jq -r '.match_lens_id_regex // empty' <<<"$rule" 2>/dev/null) || idre=""
@@ -1117,7 +1128,7 @@ massage_nef_lens() {
     # so deleting a rule in the panel really turns that rewrite off. Unknown
     # non-native glass gets queued for an interactive decision instead.
     if jq -e '.lens_rules | type == "array"' "$PANEL_CONFIG" >/dev/null 2>&1; then
-      queue_lens_question "$f" "$base" "$lens"
+      queue_lens_question "$f" "$base" "$lens" "$camera"
       return 0
     fi
   fi
@@ -1150,7 +1161,7 @@ queue_lens_question() {
   # the answer — or leaves the file untouched after the configured timeout.
   # Native NIKKOR glass never asks. The file is already sorted; this never
   # blocks or delays the pipeline.
-  local f=$1 base=$2 lens=$3 lensid pending id
+  local f=$1 base=$2 lens=$3 camera=${4:-} lensid pending id
   panel_flag ask_on_unknown || return 0
   lensid=$(exiftool_read -LensID -s3 "$f") || lensid=""
   lensid=${lensid%%$'\n'*}
@@ -1164,8 +1175,8 @@ queue_lens_question() {
   mkdir -p "$pending" 2>/dev/null || return 0
   id=$(printf '%s' "$f" | sha256sum | cut -c1-16)
   if jq -n --arg rel "${f#"$SORTED"/}" --arg lens "$lens" --arg lensid "$lensid" \
-       --arg ts "$(date +%s)" \
-       '{rel: $rel, lens: $lens, lensid: $lensid, ts: ($ts | tonumber)}' \
+       --arg camera "$camera" --arg ts "$(date +%s)" \
+       '{rel: $rel, lens: $lens, lensid: $lensid, camera: $camera, ts: ($ts | tonumber)}' \
        > "$pending/.tmp.$id" 2>/dev/null \
      && mv -f -- "$pending/.tmp.$id" "$pending/$id.json" 2>/dev/null; then
     log "lens: unknown signature '$(log_value "$lens")' — queued decision for panel: $base"
@@ -1778,7 +1789,7 @@ process() {
         # BEFORE queueing so nef-watch copies the corrected EXIF onto the
         # TIFF it renders.
         if truthy "$NEF_LENS_MASSAGE"; then
-          massage_nef_lens "$MOVED_DEST" "$moved_log"
+          massage_nef_lens "$MOVED_DEST" "$moved_log" "$camera"
         fi
         queue_nef_for_render "$MOVED_DEST" "$date/$type" "${MOVED_DEST##*/}"
         ;;
