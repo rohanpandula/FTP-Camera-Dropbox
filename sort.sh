@@ -44,6 +44,8 @@ RAW_FULL_VALIDATE="${RAW_FULL_VALIDATE:-1}"
 RAW_VALIDATE_TIMEOUT="${RAW_VALIDATE_TIMEOUT:-240}"
 RAW_VALIDATE_TMPDIR="${RAW_VALIDATE_TMPDIR:-}"
 RAW_VALIDATE_TMP_STALE_MIN="${RAW_VALIDATE_TMP_STALE_MIN:-15}"
+NEF_LENS_MASSAGE="${NEF_LENS_MASSAGE:-0}"   # rewrite adapted-lens identity tags on sorted NEFs
+NEF_QUEUE="${NEF_QUEUE:-}"                  # hard-link sorted NEFs here for the nef-watch renderer; empty disables
 
 log_value() {
   local value=$1
@@ -1018,6 +1020,86 @@ get_camera() {
   fi
 }
 
+# --- NEF post-sort hooks (adapted-lens identity fix + render queue) ---
+
+exiftool_write() {
+  timeout "$RAW_VALIDATE_TIMEOUT" exiftool -q -q -overwrite_original "$@" 2>/dev/null
+}
+
+massage_nef_lens() {
+  # Sony glass adapted onto the Nikon Zf reports its identity wrong — either
+  # a bare focal/aperture pair or the adapter's alias (Samyang VAF / Laowa
+  # strings for what is physically a GM). Rewrite lens IDENTITY tags only,
+  # never FNumber/exposure, so Lightroom names the real lens. Matching keys
+  # off the Lens signature: owned native glass (Z 40/2, Z 50/1.4) matches no
+  # case and is never touched. Runs post-move on the sorted copy — a failed
+  # write leaves a valid, unmassaged file.
+  local f=$1 base=$2 lens lensid
+  lens=$(exiftool_read -Lens -s3 "$f") || lens=""
+  lens=${lens%%$'\n'*}
+  case "$lens" in
+    "35mm f/1.4")
+      # Tag shape mirrors a native Sony body's own files (checked against an
+      # ILCE-7CR original): LensModel + LensInfo only, no LensMake.
+      if exiftool_write "-EXIF:LensModel=FE 35mm F1.4 GM" \
+        "-EXIF:LensInfo=35 35 1.4 1.4" "$f"; then
+        log "lens: $base -> Sony FE 35mm F1.4 GM"
+      else
+        log "lens massage failed (kept original tags): $base"
+      fi
+      ;;
+    "50mm f/1.2"|"50mm f/1.3")
+      if exiftool_write "-EXIF:LensModel=FE 50mm F1.2 GM" \
+        "-EXIF:LensInfo=50 50 1.2 1.2" "$f"; then
+        log "lens: $base -> Sony FE 50mm F1.2 GM"
+      else
+        log "lens massage failed (kept original tags): $base"
+      fi
+      ;;
+    "0mm f/0")
+      # Fully-manual adapted glass. The Zf menu's non-CPU focal length is not
+      # landing in EXIF; the only such lens in use is the Leica 35mm.
+      lensid=$(exiftool_read -LensID -s3 "$f") || lensid=""
+      case "$lensid" in
+        *Leica*35*|*Summicron*35*)
+          if exiftool_write -EXIF:FocalLength=35 -EXIF:FocalLengthIn35mmFormat=35 "$f"; then
+            log "lens: $base focal length -> 35mm (manual Leica)"
+          else
+            log "lens massage failed (kept original tags): $base"
+          fi
+          ;;
+      esac
+      ;;
+  esac
+  return 0
+}
+
+queue_nef_for_render() {
+  # Hard-link the sorted NEF into the render queue that the nef-watch
+  # container watches. Links cost no space and keep sorted/ as the only real
+  # home; nef-watch mirrors the queue's relative path into its --out tree, so
+  # the TIFF lands next to the NEF in sorted/. Only NEW files are linked —
+  # the historical library never re-renders.
+  local f=$1 relative=$2 base=$3
+  [[ -n "$NEF_QUEUE" ]] || return 0
+  if mkdir -p "$NEF_QUEUE/$relative" 2>/dev/null \
+    && ln -f "$f" "$NEF_QUEUE/$relative/$base" 2>/dev/null; then
+    :
+  else
+    log "nef-queue link failed: $base"
+  fi
+  return 0
+}
+
+prune_nef_queue() {
+  [[ -n "$NEF_QUEUE" && -d "$NEF_QUEUE" ]] || return 0
+  # ctime, not mtime: SMB drops preserve month-old mtimes, and a fresh hard
+  # link only updates ctime. A week is ample for nef-watch to render; pruning
+  # unpins inodes the user has since deleted from sorted/.
+  find "$NEF_QUEUE" -type f -ctime +7 -delete 2>/dev/null
+  find "$NEF_QUEUE" -mindepth 1 -type d -empty -delete 2>/dev/null
+}
+
 wait_stable() {
   local f=$1 a b start_id end_id now mtime
   [[ -f "$f" && ! -L "$f" ]] || return 1
@@ -1588,6 +1670,17 @@ process() {
     moved_log=$(log_name "$MOVED_DEST")
     log "ok: $log_base -> $date/$type/$moved_log"
     enqueue_notify "$camera" "$type" "$base"
+    case "${ext,,}" in
+      nef|nrw)
+        # MOVED_DEST is the absolute final path (suffix included). Massage
+        # BEFORE queueing so nef-watch copies the corrected EXIF onto the
+        # TIFF it renders.
+        if truthy "$NEF_LENS_MASSAGE"; then
+          massage_nef_lens "$MOVED_DEST" "$moved_log"
+        fi
+        queue_nef_for_render "$MOVED_DEST" "$date/$type" "${MOVED_DEST##*/}"
+        ;;
+    esac
   fi
   exec {source_fd}<&-
 }
@@ -1793,6 +1886,18 @@ prune_stale_raw_tmp() {
     -exec rm -rf -- {} + 2>/dev/null
 }
 
+prune_stale_ftp_tmp() {
+  # pure-ftpd runs with -0 (atomic uploads): an in-flight transfer is a
+  # .pureftpd-upload.* dot-temp that renames to the real name only on success,
+  # so process() never sees partials. pure-ftpd aborts stalled transfers at
+  # ~15 min and cameras re-send whole files (never REST/resume), so an
+  # hour-old temp has no living writer — it is debris from an aborted upload.
+  # Pruned at STUCK_AGE_MIN so debris disappears before the stuck scan below
+  # would flag it. Without -0 this find matches nothing.
+  find "$INCOMING" -type f -name '.pureftpd-upload.*' -mmin +"$STUCK_AGE_MIN" \
+    -exec rm -f -- {} + 2>/dev/null
+}
+
 reconcile() {
   log "reconcile scan"
   # -type f recurses the whole tree: a true dropbox processes files at any depth,
@@ -1803,6 +1908,8 @@ reconcile() {
   done < <(find "$INCOMING" -type f -print0 2>/dev/null)
   wait_for_workers
   prune_stale_raw_tmp
+  prune_stale_ftp_tmp
+  prune_nef_queue
   find "$INCOMING" -type f -mmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
     log "STUCK >${STUCK_AGE_MIN}min: $(log_name "$f")"
   done
