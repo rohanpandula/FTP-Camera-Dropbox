@@ -664,7 +664,7 @@ get_type() {
   case "${1,,}" in
     raf|arw|nef|cr2|cr3|dng|orf|rw2|pef|srw) echo raw ;;
     jpg|jpeg)                                 echo jpg ;;
-    heic|heif)                                echo heif ;;
+    heic|heif|hif)                            echo heif ;;
     mp4|mov|m4v|mts|m2ts|avi|mkv)             echo video ;;
     *)                                        echo other ;;
   esac
@@ -844,7 +844,7 @@ heif_container_validate() {
   local box_count=0 ftyp_seen=0 meta_seen=0 brand_hex brand_offset brand_end
 
   case "$ext" in
-    heic|heif) ;;
+    heic|heif|hif) ;;
     *) log "validate: unsupported heif extension ($ext)"; return 1 ;;
   esac
   file_size=$(stat -Lc %s "$f" 2>/dev/null) || {
