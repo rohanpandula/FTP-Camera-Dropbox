@@ -1012,8 +1012,13 @@ get_camera() {
   fi
   output=${output%%$'\n'*}
   model=$(sanitize "$output")
-  # collapse redundant words (NIKON CORPORATION NIKON Z 9 -> NIKON Z 9)
-  if [[ -n "$make" && "$model" == "$make "* ]]; then
+  # collapse redundant words (NIKON CORPORATION NIKON Z 9 -> NIKON Z 9).
+  # Compare against the make's FIRST word: Nikon writes Make="NIKON
+  # CORPORATION" but prefixes models with plain "NIKON", so a full-make
+  # prefix test never fired. The panel's camera scanner mirrors this
+  # composition exactly — keep them in lockstep.
+  local make_head=${make%% *}
+  if [[ -n "$make" && -n "$model" && "$model" == "$make_head"* ]]; then
     echo "$model"
   elif [[ -n "$make" && -n "$model" ]]; then
     echo "$make $model"
