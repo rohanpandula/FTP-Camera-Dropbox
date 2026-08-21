@@ -550,16 +550,40 @@ async def notify_failure(kind: str, detail: str, throttle_minutes: int = 15) -> 
 
 
 async def _remember_c2c_folder(parent_folder: str | None, account_id: str) -> None:
-    """Remember reconciliation identifiers without blocking this download."""
-    if not parent_folder:
+    """Remember reconciliation identifiers without blocking this download.
+
+    Camera-to-Cloud gives each paired device its own ingest folder, so every
+    distinct folder is retained (c2c_folder_ids) and swept by reconciliation —
+    a newly paired camera must never be silently excluded from the
+    missed-webhook backfill. The legacy single c2c_folder_id is still written
+    on first discovery for compatibility with existing state files.
+    """
+    if not isinstance(parent_folder, str) or not parent_folder or len(parent_folder) > 200:
         return
     state = _load_state()
-    current_folder = CFG["c2c_folder_id"] or state.get("c2c_folder_id")
     current_account = CFG["c2c_account_id"] or state.get("c2c_account_id")
-    updates: dict[str, str] = {}
-    if not current_folder:
+    legacy = CFG["c2c_folder_id"] or state.get("c2c_folder_id")
+    known: list[str] = []
+    if isinstance(legacy, str) and legacy:
+        known.append(legacy)
+    stored = state.get("c2c_folder_ids")
+    if isinstance(stored, list):
+        for fid in stored:
+            if isinstance(fid, str) and fid and len(fid) <= 200 and fid not in known:
+                known.append(fid)
+    updates: dict[str, object] = {}
+    if not legacy:
         updates["c2c_folder_id"] = parent_folder
         CFG["c2c_folder_id"] = parent_folder
+    if parent_folder not in known:
+        if len(known) >= 16:
+            log.warning(
+                "Not remembering C2C folder %s…: registry already holds %d folders",
+                parent_folder[:8],
+                len(known),
+            )
+        else:
+            updates["c2c_folder_ids"] = known + [parent_folder]
     if not current_account:
         updates["c2c_account_id"] = account_id
         CFG["c2c_account_id"] = account_id
@@ -580,9 +604,10 @@ async def _remember_c2c_folder(parent_folder: str | None, account_id: str) -> No
         )
         return
     log.info(
-        "Discovered C2C ingest folder: %s (account=%s) — reconciliation enabled",
-        CFG["c2c_folder_id"] or current_folder,
+        "Discovered C2C ingest folder: %s (account=%s) — reconciliation covers %d folder(s)",
+        parent_folder,
         CFG["c2c_account_id"] or current_account,
+        len(_reconcile_folder_ids()),
     )
 
 
@@ -1161,6 +1186,159 @@ async def _process_reconcile_jobs(jobs: list[tuple[str, str]]) -> int:
     return admitted
 
 
+def _reconcile_folder_ids() -> list[str]:
+    """Every ingest folder to sweep: the legacy single id plus each
+    folder discovered since (one per paired Camera-to-Cloud device)."""
+    state = _load_state()
+    ids: list[str] = []
+    primary = CFG["c2c_folder_id"] or state.get("c2c_folder_id")
+    if isinstance(primary, str) and primary:
+        ids.append(primary)
+    stored = state.get("c2c_folder_ids")
+    if isinstance(stored, list):
+        for fid in stored:
+            if isinstance(fid, str) and fid and len(fid) <= 200 and fid not in ids:
+                ids.append(fid)
+    return ids[:16]
+
+
+async def _sweep_folder(
+    client: httpx.AsyncClient, auth: dict, account_id: str, folder_id: str
+) -> tuple[list[str], bool]:
+    """List one ingest folder. Returns (assets_seen, listing_complete).
+
+    Body unchanged from the original single-folder reconcile: per-folder
+    persisted cursors, page budgets, pagination-loop and malformed-page
+    defenses all apply to each folder independently."""
+    orphans: list[str] = []
+    listing_complete = False
+    endpoint = (
+        f"{FRAMEIO_API}/accounts/{account_id}/folders/{folder_id}/files"
+    )
+    resumed = False
+    try:
+        cursor_url = _load_reconcile_cursor(account_id, folder_id, endpoint)
+    except Exception as exc:
+        log.error("Reconcile: invalid persisted cursor: %s", exc)
+        await notify_failure(
+            "reconcile_cursor_invalid",
+            "The saved Frame.io pagination cursor is invalid. Starting a "
+            "safe full sweep without pruning receipts.",
+            throttle_minutes=60,
+        )
+        cursor_url = None
+    if cursor_url:
+        url = cursor_url
+        params: dict | None = None
+        resumed = True
+    else:
+        url = endpoint
+        params = {"page_size": 100}
+    seen_page_urls = {url}
+    pages_seen = 0
+    items_seen = 0
+    deadline = time.monotonic() + CFG["reconcile_max_seconds"]
+    while True:
+        resp = await client.get(url, params=params, headers=auth, timeout=30)
+        if resp.status_code != 200:
+            if resumed and pages_seen == 0 and resp.status_code in (400, 404, 410):
+                log.warning(
+                    "Reconcile cursor expired with HTTP %d; restarting from folder root",
+                    resp.status_code,
+                )
+                _save_reconcile_cursor(None, account_id, folder_id)
+                url = endpoint
+                params = {"page_size": 100}
+                resumed = False
+                seen_page_urls = {endpoint}
+                continue
+            log.error(
+                "Reconcile: list failed HTTP %d %s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            await notify_failure(
+                "reconcile_list_failed",
+                f"HTTP {resp.status_code} listing folder {folder_id[:8]}…: "
+                f"{resp.text[:200]}",
+                throttle_minutes=60,
+            )
+            break
+        try:
+            page_assets, next_link, page_items = _parse_listing_page(resp.json())
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            log.error("Reconcile: malformed listing page: %s", exc)
+            try:
+                _save_reconcile_cursor(url, account_id, folder_id)
+            except Exception:
+                log.exception("Could not preserve reconcile cursor after malformed page")
+            await notify_failure(
+                "reconcile_listing_invalid",
+                "Frame.io returned a malformed HTTP-200 folder listing. The "
+                "partial sweep was not used to prune receipts and this page will retry.",
+                throttle_minutes=60,
+            )
+            break
+        orphans.extend(page_assets)
+        pages_seen += 1
+        items_seen += page_items
+        if next_link is None:
+            listing_complete = not resumed
+            if resumed:
+                try:
+                    _save_reconcile_cursor(None, account_id, folder_id)
+                except Exception:
+                    log.exception("Could not clear completed reconcile cursor")
+            break
+        try:
+            next_url = _validated_next_page_url(url, next_link, endpoint)
+        except ValueError as exc:
+            log.error("Reconcile: %s", exc)
+            await notify_failure(
+                "reconcile_pagination_invalid",
+                "Frame.io returned an unsafe pagination link; processing only "
+                "the pages already fetched and preserving all receipts.",
+                throttle_minutes=60,
+            )
+            break
+        if next_url in seen_page_urls:
+            log.error("Reconcile: pagination loop detected")
+            await notify_failure(
+                "reconcile_pagination_loop",
+                "Frame.io pagination repeated a page URL; processing the pages "
+                "already fetched and preserving all receipts.",
+                throttle_minutes=60,
+            )
+            break
+        seen_page_urls.add(next_url)
+        if (
+            pages_seen >= CFG["reconcile_max_pages"]
+            or items_seen >= CFG["reconcile_max_items"]
+            or time.monotonic() >= deadline
+        ):
+            try:
+                _save_reconcile_cursor(next_url, account_id, folder_id)
+            except Exception:
+                log.exception("Could not persist bounded reconcile cursor")
+            log.warning(
+                "Reconcile budget reached after %d page(s)/%d item(s); "
+                "resuming next cycle",
+                pages_seen,
+                items_seen,
+            )
+            await notify_failure(
+                "reconcile_budget",
+                "The Frame.io folder exceeded one reconcile cycle's safety "
+                "budget. Progress was saved and the next cycle will resume "
+                "without pruning receipts.",
+                throttle_minutes=60,
+            )
+            break
+        url = next_url
+        params = None
+    return orphans, listing_complete
+
+
 async def reconcile_once() -> int:
     """Walk the C2C folder and queue orphan files. Returns count admitted."""
     if not (CFG["adobe_client_id"] and CFG["adobe_client_secret"]):
@@ -1173,143 +1351,29 @@ async def reconcile_once() -> int:
     for publication_id, publication in _pending_publications(strict=True).items():
         pending_snapshot.setdefault(publication_id, publication["account_id"])
 
-    folder_id = CFG["c2c_folder_id"] or _load_state().get("c2c_folder_id")
+    folder_ids = _reconcile_folder_ids()
     account_id = CFG["c2c_account_id"] or _load_state().get("c2c_account_id")
-    if not (folder_id and account_id):
+    if not (folder_ids and account_id):
         log.debug("Reconcile listing skipped — no folder_id discovered yet")
         return await _process_reconcile_jobs(list(pending_snapshot.items()))
 
     orphans: list[str] = []
-    listing_complete = False
+    listing_complete = True
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
             token = await get_token(client)
             auth = {"Authorization": f"Bearer {token}"}
-            endpoint = (
-                f"{FRAMEIO_API}/accounts/{account_id}/folders/{folder_id}/files"
-            )
-            resumed = False
-            try:
-                cursor_url = _load_reconcile_cursor(account_id, folder_id, endpoint)
-            except Exception as exc:
-                log.error("Reconcile: invalid persisted cursor: %s", exc)
-                await notify_failure(
-                    "reconcile_cursor_invalid",
-                    "The saved Frame.io pagination cursor is invalid. Starting a "
-                    "safe full sweep without pruning receipts.",
-                    throttle_minutes=60,
+            # One sweep per paired camera's folder. Receipt pruning below
+            # requires EVERY folder to have listed completely.
+            for folder_id in folder_ids:
+                folder_assets, folder_complete = await _sweep_folder(
+                    client, auth, account_id, folder_id
                 )
-                cursor_url = None
-            if cursor_url:
-                url = cursor_url
-                params: dict | None = None
-                resumed = True
-            else:
-                url = endpoint
-                params = {"page_size": 100}
-            seen_page_urls = {url}
-            pages_seen = 0
-            items_seen = 0
-            deadline = time.monotonic() + CFG["reconcile_max_seconds"]
-            while True:
-                resp = await client.get(url, params=params, headers=auth, timeout=30)
-                if resp.status_code != 200:
-                    if resumed and pages_seen == 0 and resp.status_code in (400, 404, 410):
-                        log.warning(
-                            "Reconcile cursor expired with HTTP %d; restarting from folder root",
-                            resp.status_code,
-                        )
-                        _save_reconcile_cursor(None, account_id, folder_id)
-                        url = endpoint
-                        params = {"page_size": 100}
-                        resumed = False
-                        seen_page_urls = {endpoint}
-                        continue
-                    log.error(
-                        "Reconcile: list failed HTTP %d %s",
-                        resp.status_code,
-                        resp.text[:200],
-                    )
-                    await notify_failure(
-                        "reconcile_list_failed",
-                        f"HTTP {resp.status_code} listing folder {folder_id[:8]}…: "
-                        f"{resp.text[:200]}",
-                        throttle_minutes=60,
-                    )
-                    break
-                try:
-                    page_assets, next_link, page_items = _parse_listing_page(resp.json())
-                except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                    log.error("Reconcile: malformed listing page: %s", exc)
-                    try:
-                        _save_reconcile_cursor(url, account_id, folder_id)
-                    except Exception:
-                        log.exception("Could not preserve reconcile cursor after malformed page")
-                    await notify_failure(
-                        "reconcile_listing_invalid",
-                        "Frame.io returned a malformed HTTP-200 folder listing. The "
-                        "partial sweep was not used to prune receipts and this page will retry.",
-                        throttle_minutes=60,
-                    )
-                    break
-                orphans.extend(page_assets)
-                pages_seen += 1
-                items_seen += page_items
-                if next_link is None:
-                    listing_complete = not resumed
-                    if resumed:
-                        try:
-                            _save_reconcile_cursor(None, account_id, folder_id)
-                        except Exception:
-                            log.exception("Could not clear completed reconcile cursor")
-                    break
-                try:
-                    next_url = _validated_next_page_url(url, next_link, endpoint)
-                except ValueError as exc:
-                    log.error("Reconcile: %s", exc)
-                    await notify_failure(
-                        "reconcile_pagination_invalid",
-                        "Frame.io returned an unsafe pagination link; processing only "
-                        "the pages already fetched and preserving all receipts.",
-                        throttle_minutes=60,
-                    )
-                    break
-                if next_url in seen_page_urls:
-                    log.error("Reconcile: pagination loop detected")
-                    await notify_failure(
-                        "reconcile_pagination_loop",
-                        "Frame.io pagination repeated a page URL; processing the pages "
-                        "already fetched and preserving all receipts.",
-                        throttle_minutes=60,
-                    )
-                    break
-                seen_page_urls.add(next_url)
-                if (
-                    pages_seen >= CFG["reconcile_max_pages"]
-                    or items_seen >= CFG["reconcile_max_items"]
-                    or time.monotonic() >= deadline
-                ):
-                    try:
-                        _save_reconcile_cursor(next_url, account_id, folder_id)
-                    except Exception:
-                        log.exception("Could not persist bounded reconcile cursor")
-                    log.warning(
-                        "Reconcile budget reached after %d page(s)/%d item(s); "
-                        "resuming next cycle",
-                        pages_seen,
-                        items_seen,
-                    )
-                    await notify_failure(
-                        "reconcile_budget",
-                        "The Frame.io folder exceeded one reconcile cycle's safety "
-                        "budget. Progress was saved and the next cycle will resume "
-                        "without pruning receipts.",
-                        throttle_minutes=60,
-                    )
-                    break
-                url = next_url
-                params = None
+                orphans.extend(folder_assets)
+                listing_complete = listing_complete and folder_complete
+
     except Exception as exc:
+        listing_complete = False
         log.error("Reconcile listing failed: %s", exc)
         await notify_failure(
             "reconcile_list_failed",
