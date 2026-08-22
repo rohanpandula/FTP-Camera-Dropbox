@@ -15,6 +15,7 @@ This is a Lightroom-style auto-import folder that runs on your own hardware, wit
 - Content validation: RAW size floor + severe ExifTool EOF checks + LibRaw unpack check, JPEG SOI/EOI checks, HEIF box-boundary checks, and video moov/Duration checks
 - Collision-safe naming (`file`, `file_2`, `file_3`, …) that never deletes an incoming copy based on a raceable hash comparison
 - Quarantine folder for files that fail validation (truncated uploads, corrupted transfers)
+- Vendored pure-ftpd fork (`pure-ftpd/`): Debian's package rebuilt with a one-hunk patch so an aborted upload deletes its temp file instead of being published as a truncated partial — quarantine only ever sees real corruption (`tests/pure-ftpd-abort.py` proves it)
 - Handles camera retry storms: `wait_stable` holds until the file size is unchanged for 60 seconds
 - Processes independent files concurrently with a bounded worker pool (4 workers by default)
 - Optional Telegram notifications, batched per 5-minute window instead of one ping per file
@@ -169,6 +170,8 @@ These are the things that cost real time to figure out.
 
 **`wait_stable` needs to be ~60 seconds for fresh uploads, not 2 seconds.** Cameras can pause for several seconds while reconnecting, so a 2-second check can bless a partial upload mid-retry. Fresh files therefore pay the full quiet-window check. A cold-start backlog whose mtimes are already at least `STABLE_SKIP_AGE` old (one hour by default) can skip that delay: this is longer than the observed FTP abort/retry window, and structural/LibRaw validation still runs before any move.
 
+**pure-ftpd's `-0` (atomic uploads) still publishes aborted uploads.** It writes the transfer to a hidden `.pureftpd-upload.*` temp, but `dostor()` in `src/ftpd.c` renames that temp onto the real name *before* it checks whether the transfer completed. A camera whose Wi-Fi dies mid-file gets `451 Transfer aborted`, and the truncated partial still lands in `incoming/` under its final name (upstream master behaves the same, and the `-o` upload-script hook fires on aborts too). Every retry storm therefore filled quarantine with `DSC01833.ARW`, `DSC01833_2.ARW`, … next to one good copy in `sorted/`. `pure-ftpd/` rebuilds Debian's own pure-ftpd package with a one-hunk patch (plus the `CAP_SYS_NICE`/`CAP_DAC_READ_SEARCH` drop the stilliard image already carries, so the binary keeps its capability set): when the transfer ended in error and was not a `REST` resume, skip the rename, and the existing cleanup at the end of `dostor()` unlinks the temp. Compose builds it; for a CLI-managed container run `docker build -t ftp-camera-dropbox/pure-ftpd pure-ftpd/` and recreate the container from that image. `tests/pure-ftpd-abort.py ftp://cameras:cameras@HOST/` proves it: the script resets the data connection mid-upload the way a dying Wi-Fi link does and fails if anything appears under the final name — it fails against stock pure-ftpd, which is the point.
+
 **Readable EXIF does not mean a RAW is intact.** A truncated RAW can still have valid camera/date metadata near the front of the file while the image payload ends early. RAW sorting therefore fails files with severe ExifTool EOF/corruption warnings, then runs `raw-identify` plus a full LibRaw unpack with `simple_dcraw -D -4` before moving the file to `sorted/`. This is slower and writes a large temporary PPM under the private sorter control mount, but it catches the "end of file" class of corruption before the file is blessed.
 
 **A readable file type does not mean a video is intact.** The MP4 `ftyp` header sits at the front of the file, but camera QuickTime variants (Sony XAVC-S, Fuji MOV) write the `moov` index at the end, after the media data. So a transfer that dies partway leaves a file that still identifies as a perfectly good MP4 to a header check. Each retry may also die at a different byte count and otherwise look like another suffixed copy. Validation therefore requires an intact tail: any ExifTool "Truncated" warning fails the file, and MP4/MOV/M4V must yield a `Duration` (no `moov`, no blessing) — the video equivalent of the RAW EOF checks.
@@ -199,7 +202,7 @@ These are the things that cost real time to figure out.
 Camera (Wi-Fi FTP)
        |
        v
-  pure-ftpd (:21)
+  pure-ftpd (:21)          -- vendored fork: an aborted upload never lands
        |  writes to
        v
   /data/incoming/          <-- shared Docker volume
