@@ -2010,10 +2010,12 @@ prune_stale_raw_tmp() {
 
 prune_stale_ftp_tmp() {
   # pure-ftpd runs with -0 (atomic uploads): an in-flight transfer is a
-  # .pureftpd-upload.* dot-temp that renames to the real name only on success,
-  # so process() never sees partials. pure-ftpd aborts stalled transfers at
-  # ~15 min and cameras re-send whole files (never REST/resume), so an
-  # hour-old temp has no living writer — it is debris from an aborted upload.
+  # .pureftpd-upload.* dot-temp, so process() never sees it. Stock pure-ftpd
+  # renames that temp onto the real name even after a 451 abort (which is how
+  # truncated partials used to reach quarantine); the fork under pure-ftpd/
+  # unlinks it on abort instead. Either way pure-ftpd aborts stalled transfers
+  # at ~15 min and cameras re-send whole files (never REST/resume), so an
+  # hour-old temp has no living writer — it is debris from a pure-ftpd crash.
   # Pruned at STUCK_AGE_MIN so debris disappears before the stuck scan below
   # would flag it. Without -0 this find matches nothing.
   find "$INCOMING" -type f -name '.pureftpd-upload.*' -mmin +"$STUCK_AGE_MIN" \

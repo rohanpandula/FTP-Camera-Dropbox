@@ -1,0 +1,34 @@
+Subject: dostor: do not publish aborted uploads when -0 (--notruncate) is set
+
+With -0, pure-ftpd uploads into a hidden .pureftpd-upload.* temp and renames
+it onto the requested name. dostor() performs that rename before it looks at
+the transfer result, so a transfer that ended in "451 Transfer aborted"
+(client TCP reset, idle timeout, ABOR, dropped control connection) is
+published under its final name exactly like a completed one. Cameras on a
+flaky Wi-Fi link therefore leave truncated DSC01833.ARW files behind on every
+failed attempt, and retry the same name until one completes.
+
+Skip the rename when the transfer failed and this was not a REST resume; the
+existing cleanup at the end: label then unlinks the temp. Resumes keep the
+stock behaviour since the temp holds the client's pre-existing bytes.
+
+Applies to upstream 1.0.50 and current master (the block is unchanged).
+
+--- a/src/ftpd.c
++++ b/src/ftpd.c
+@@ -4353,6 +4353,15 @@
+                 atomic_file = NULL;
+             }
+         } else if (atomic_file != NULL) {
++            /* FTP-Camera-Dropbox: never publish an aborted upload. When the
++             * transfer ended with an error (peer reset, idle timeout, ABOR,
++             * dropped control connection) skip the rename; the cleanup at
++             * end: unlinks the .pureftpd-upload.* temp instead. Resumed
++             * uploads (restartat > 0) keep the stock behaviour because the
++             * temp then holds the client's pre-existing bytes. */
++            if (ret != 0 && restartat == (off_t) 0) {
++                goto afterquota;
++            }
+             if ((atomic_file_size = get_file_size(atomic_file)) < (off_t) 0) {
+                 goto afterquota;
+             }
