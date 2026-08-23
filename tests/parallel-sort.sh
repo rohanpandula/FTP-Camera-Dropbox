@@ -233,14 +233,23 @@ assert_count_below_for() {
   return 0
 }
 
+# Derive the process tree from each process's ppid rather than from
+# /proc/<pid>/task/<pid>/children: that file needs CONFIG_PROC_CHILDREN, which
+# Unraid's kernel lacks, and without it every descendant lookup came back empty.
+# comm (field 2 of /proc/<pid>/stat) is parenthesised and may itself contain
+# spaces or parentheses, so fields are only counted after the LAST ')'.
 list_descendants() {
-  local parent=$1 children="" child
+  local parent=$1 stat line pid ppid _state _rest
   local IFS=$' \t\n'
-  [[ -r "/proc/$parent/task/$parent/children" ]] || return 0
-  children=$(<"/proc/$parent/task/$parent/children")
-  for child in $children; do
-    printf '%s\n' "$child"
-    list_descendants "$child"
+  for stat in /proc/[0-9]*/stat; do
+    { read -r line < "$stat"; } 2>/dev/null || continue
+    line=${line##*) }
+    read -r _state ppid _rest <<< "$line"
+    [[ "$ppid" == "$parent" ]] || continue
+    pid=${stat#/proc/}
+    pid=${pid%/stat}
+    printf '%s\n' "$pid"
+    list_descendants "$pid"
   done
 }
 
