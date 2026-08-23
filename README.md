@@ -13,7 +13,7 @@ This is a Lightroom-style auto-import folder that runs on your own hardware, wit
 - Auto-sorts by EXIF `DateTimeOriginal` → `YYYY-MM-DD/raw|jpg|heif|video/filename`
 - Falls back to file mtime when the EXIF date is missing or suspicious
 - Content validation: RAW size floor + severe ExifTool EOF checks + LibRaw unpack check, JPEG SOI/EOI checks, HEIF box-boundary checks, and video moov/Duration checks
-- Collision-safe naming (`file`, `file_2`, `file_3`, …) that never deletes an incoming copy based on a raceable hash comparison
+- Collision-safe naming (`file`, `file_2`, `file_3`, …) for same-name files with different bytes; a byte-identical re-send (camera retry, SD-card drag of shots that already uploaded) is staged under `quarantine/_dupes/` and pruned after 7 days instead of becoming a `_2` copy — nothing is ever deleted in the ingest path
 - Quarantine folder for files that fail validation (truncated uploads, corrupted transfers)
 - Vendored pure-ftpd fork (`pure-ftpd/`): Debian's package rebuilt with a one-hunk patch so an aborted upload deletes its temp file instead of being published as a truncated partial — quarantine only ever sees real corruption (`tests/pure-ftpd-abort.py` proves it)
 - Handles camera retry storms: `wait_stable` holds until the file size is unchanged for 60 seconds
@@ -103,6 +103,7 @@ All settings have sensible defaults. Override via `.env` or environment variable
 | `QUARANTINE` | `/data/quarantine` | Destination for files that fail validation |
 | `RECONCILE_IDLE` | `300` | Maximum seconds between full reconcile scans, even while inotify events are arriving. |
 | `STUCK_AGE_MIN` | `60` | Log a warning for files that have been sitting in incoming this long (minutes) |
+| `DUPES_KEEP_DAYS` | `7` | Byte-identical re-sends of a file already in `sorted/` are staged under `quarantine/_dupes/<date>/` and deleted once older than this many days (by ctime, i.e. since staging). |
 | `TG_CONFIG` | `/etc/telegram.json` | Path to Telegram credentials file inside the container |
 
 ### Telegram (optional)
@@ -180,7 +181,7 @@ These are the things that cost real time to figure out.
 
 **macvlan / br0 host-isolation is a red herring on Unraid.** If you assign each container a dedicated IP on br0, the Unraid host itself can't ping or connect to its own containers (`Destination Host Unreachable`). That's a Linux kernel rule about macvlan interfaces, not a bug in your FTP setup: the host and its macvlan children can't talk directly. Other devices on your LAN (including cameras) reach the containers fine. I spent a while convinced the FTP server was broken when it was just the host's network view that was isolated.
 
-**A name collision preserves both files.** Even a matching size or hash is not enough reason to delete the incoming copy: an SMB client can replace the existing leaf between a comparison and deletion. The sorter therefore uses `name_2.ext`, `name_3.ext`, and so on for every collision. This may retain an exact camera retry, but it guarantees that a concurrent writer cannot turn deduplication into loss of the only camera copy.
+**A name collision never deletes anything in the ingest path.** A matching size or hash is not enough reason to *delete* the incoming copy: an SMB client can replace the existing leaf between the comparison and the unlink, and the incoming file might have been the only intact copy. So the sorter compares (against the pinned incoming fd, re-checking the destination inode afterwards) and then *moves*: a byte-identical re-send goes to `quarantine/_dupes/<date>/` — still on disk if that one-in-a-million swap ever happens — and is pruned after `DUPES_KEEP_DAYS`; anything that differs keeps both copies as `name_2.ext`, `name_3.ext`, … Real-world source of dupes: dragging an SD card into `incoming/` over SMB after the camera already FTP'd half of it.
 
 ### Frame.io mirror gotchas
 
@@ -219,6 +220,7 @@ Camera (Wi-Fi FTP)
        |
        |-- ok     --> /data/sorted/YYYY-MM-DD/{raw,jpg,heif,video}/filename
        |-- bad    --> /data/quarantine/YYYY-MM-DD/filename
+       |-- dupe   --> /data/quarantine/_dupes/YYYY-MM-DD/filename  (byte-identical re-send, pruned after 7d)
        |-- clash  --> both kept (`filename_2`, `filename_3`, ...)
        |
        v

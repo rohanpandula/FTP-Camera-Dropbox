@@ -1096,19 +1096,23 @@ SORTER_PID=$!
 
 wait_for_count "$TEST_ROOT/data/incoming" 0 30 \
   || fail "byte-identical collision input did not finish processing"
+staged_dupe="$TEST_ROOT/data/quarantine/_dupes/$fixture_date/identical-collision.dat"
 [[ -f "$identical_dir/identical-collision.dat" \
-  && -f "$identical_dir/identical-collision_2.dat" ]] \
-  || fail "byte-identical collision did not preserve both base and suffix copies"
-cmp -s "$identical_dir/identical-collision.dat" \
-  "$identical_dir/identical-collision_2.dat" \
-  || fail "byte-identical collision changed one of the preserved copies"
+  && ! -e "$identical_dir/identical-collision_2.dat" ]] \
+  || fail "byte-identical collision did not keep exactly one sorted copy"
+[[ -f "$staged_dupe" ]] \
+  || fail "byte-identical collision was not staged under quarantine/_dupes"
+cmp -s "$identical_dir/identical-collision.dat" "$staged_dupe" \
+  || fail "staged duplicate differs from the sorted copy"
 [[ "$(cat "$identical_dir/identical-collision.dat")" \
   == "BYTE-IDENTICAL CAMERA PAYLOAD" ]] \
   || fail "byte-identical collision did not preserve the expected payload"
-[[ $(find "$TEST_ROOT/data/sorted" -type f | wc -l) -eq 2 ]] \
+[[ $(find "$TEST_ROOT/data/sorted" -type f | wc -l) -eq 1 ]] \
   || fail "byte-identical collision produced an unexpected output count"
+grep -q 'DUPLICATE: identical-collision.dat == ' "$TEST_ROOT/sorter.log" \
+  || fail "byte-identical collision was not logged as DUPLICATE"
 
-echo "PASS: byte-identical destination collision preserved base and _2 copies"
+echo "PASS: byte-identical destination collision staged the re-send under quarantine/_dupes"
 
 stop_sorter
 for destination_case in leaf_symlink date_symlink; do
