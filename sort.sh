@@ -34,6 +34,7 @@ WATCH_READY_TIMEOUT="${WATCH_READY_TIMEOUT:-30}"
 STUCK_AGE_MIN="${STUCK_AGE_MIN:-60}"
 STABLE_WAIT="${STABLE_WAIT:-60}"
 STABLE_SKIP_AGE="${STABLE_SKIP_AGE:-3600}"  # skip the wait for files older than this (seconds)
+DUPES_KEEP_DAYS="${DUPES_KEEP_DAYS:-7}"     # prune quarantine/_dupes entries older than this
 SORT_WORKERS="${SORT_WORKERS:-4}"            # files processed concurrently
 NOTIFY_INTERVAL="${NOTIFY_INTERVAL:-300}"   # 5 minutes
 RAW_MIN_BYTES_DEFAULT="${RAW_MIN_BYTES_DEFAULT:-5000000}"
@@ -123,7 +124,7 @@ LEGACY_PERM_QUEUE="${INCOMING%/*}/.perm-queue.tsv"
 
 for numeric_name in \
   SORT_WORKERS RECONCILE_IDLE WATCH_READY_TIMEOUT STUCK_AGE_MIN \
-  STABLE_WAIT STABLE_SKIP_AGE NOTIFY_INTERVAL \
+  STABLE_WAIT STABLE_SKIP_AGE NOTIFY_INTERVAL DUPES_KEEP_DAYS \
   RAW_MIN_BYTES_DEFAULT RAW_MIN_BYTES_NIKON_ZF RAW_MIN_BYTES_SONY_A7CR \
   RAW_MIN_BYTES_GFX100 RAW_VALIDATE_TIMEOUT RAW_VALIDATE_TMP_STALE_MIN; do
   numeric_value=${!numeric_name}
@@ -1326,6 +1327,26 @@ validate_file() {
   return 0
 }
 
+# An incoming file whose name already exists in sorted/ with identical bytes is
+# a re-send (camera retry, SD-card drag of shots that already uploaded). It is
+# staged under quarantine/_dupes/<date>/ instead of becoming name_2.ext, and
+# pruned after DUPES_KEEP_DAYS. Staging instead of deleting is what makes the
+# compare-then-act race harmless: if an SMB writer swaps the sorted leaf between
+# the compare and the move, the incoming bytes still exist on disk. The source
+# is the pinned /proc fd from process(); the leaf identity is re-read after the
+# compare so a swapped destination falls back to the _N path.
+# ponytail: runs outside the move lock — a concurrent same-name move simply
+# ends up on the _N path, never in data loss.
+exact_duplicate() {
+  local src=$1 dst=$2 before after
+  [[ -f "$dst" && ! -L "$dst" ]] || return 1
+  before=$(path_identity "$dst") || return 1
+  [[ "$(stat -Lc %s -- "$src" 2>/dev/null)" == "$(stat -c %s -- "$dst" 2>/dev/null)" ]] || return 1
+  cmp -s -- "$src" "$dst" || return 1
+  after=$(path_identity "$dst") || return 1
+  [[ "$before" == "$after" ]]
+}
+
 MOVED_DEST=""
 move_with_suffix() {
   local f=$1 root=$2 relative=$3 base=$4 name=$5 ext=$6 expected_source_id=$7
@@ -1423,9 +1444,10 @@ move_with_suffix() {
             break
           fi
           # Never delete an incoming file merely because an existing path has
-          # matching bytes. A same-UID SMB writer can swap that leaf between a
-          # hash and unlink. Keeping both with a suffix is the only fail-safe
-          # collision policy without a dirfd-based compare-and-stage helper.
+          # matching bytes: a same-UID SMB writer can swap that leaf between a
+          # compare and an unlink. Byte-identical re-sends are *staged* under
+          # quarantine/_dupes by process() before it ever calls this function;
+          # anything that reaches here keeps both copies with a suffix.
           leaf="${name}_${n}.${ext}"
           n=$((n+1))
           if (( n > 999 )); then
@@ -1784,6 +1806,15 @@ process() {
   # moved, an SMB client may legitimately rename output folders; notification
   # generation must not re-open a path whose ancestry can change independently.
   local camera; camera=$(get_camera "$source_ref")
+  if exact_duplicate "$source_ref" "$SORTED/$date/$type/$base"; then
+    if move_with_suffix "$f" "$QUARANTINE" "_dupes/$date" "$base" "$name" "$ext" "$expected_source_id"; then
+      moved_log=$(log_name "$MOVED_DEST")
+      log "DUPLICATE: $log_base == $date/$type/$log_base -> _dupes/$date/$moved_log (pruned after ${DUPES_KEEP_DAYS}d)"
+      enqueue_notify "duplicate (already in sorted)" "$type" "$base"
+    fi
+    exec {source_fd}<&-
+    return 0
+  fi
   if move_with_suffix "$f" "$SORTED" "$date/$type" "$base" "$name" "$ext" "$expected_source_id"; then
     moved_log=$(log_name "$MOVED_DEST")
     log "ok: $log_base -> $date/$type/$moved_log"
@@ -2022,6 +2053,15 @@ prune_stale_ftp_tmp() {
     -exec rm -f -- {} + 2>/dev/null
 }
 
+prune_stale_dupes() {
+  # Staged duplicates are byte-identical to a file still in sorted/; the stage
+  # is only an undo window. ctime, not mtime: the move keeps the camera's
+  # capture-time mtime (possibly weeks old) but bumps ctime.
+  [[ -d "$QUARANTINE/_dupes" ]] || return 0
+  find "$QUARANTINE/_dupes" -type f -ctime +"$DUPES_KEEP_DAYS" -delete 2>/dev/null
+  find "$QUARANTINE/_dupes" -mindepth 1 -type d -empty -delete 2>/dev/null
+}
+
 reconcile() {
   log "reconcile scan"
   # -type f recurses the whole tree: a true dropbox processes files at any depth,
@@ -2033,6 +2073,7 @@ reconcile() {
   wait_for_workers
   prune_stale_raw_tmp
   prune_stale_ftp_tmp
+  prune_stale_dupes
   prune_nef_queue
   find "$INCOMING" -type f -mmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
     log "STUCK >${STUCK_AGE_MIN}min: $(log_name "$f")"
