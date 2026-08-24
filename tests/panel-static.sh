@@ -24,6 +24,8 @@ required = (
     'switches: "automations"',
     'const esc = value =>',
     'data-armed="0"',
+    'data-quarantine="prune_verified"',
+    'prune_verified',
     '/api/status',
     '/api/library',
     '/api/quarantine',

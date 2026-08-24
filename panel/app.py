@@ -593,8 +593,33 @@ async def api_config_put(request: Request):
 
 # -------------------------------------------------------------- quarantine ----
 
+_lib_index_lock = threading.Lock()
+_lib_index_cache = {"ts": 0.0, "index": {}}
+
+
+def _library_name_sizes() -> dict:
+    # name -> set of sizes across sorted/, used to recognise a held file whose
+    # identical copy already lives in the library. Cached briefly: the walk is
+    # cheap relative to exiftool work but not free on very large libraries.
+    with _lib_index_lock:
+        now = time.time()
+        if now - _lib_index_cache["ts"] < 60:
+            return _lib_index_cache["index"]
+        index = {}
+        if SORTED.is_dir():
+            for f in walk_files(SORTED):
+                try:
+                    index.setdefault(f.name, set()).add(f.stat().st_size)
+                except OSError:
+                    continue
+        _lib_index_cache["ts"] = now
+        _lib_index_cache["index"] = index
+        return index
+
+
 @app.get("/api/quarantine")
 def api_quarantine():
+    index = _library_name_sizes()
     files = []
     for f in walk_files(QUAR):
         try:
@@ -602,7 +627,9 @@ def api_quarantine():
         except OSError:
             continue
         files.append({"rel": str(f.relative_to(QUAR)), "name": f.name,
-                      "date": f.parent.name, "size": st.st_size, "mtime": int(st.st_mtime)})
+                      "date": f.parent.name, "size": st.st_size,
+                      "mtime": int(st.st_mtime),
+                      "in_library": st.st_size in index.get(f.name, set())})
     files.sort(key=lambda x: x["mtime"], reverse=True)
     return no_store({"files": files[:500]})
 
@@ -611,11 +638,32 @@ def api_quarantine():
 async def api_quarantine_action(request: Request):
     try:
         body = await request.json()
-        rel, action = str(body["rel"]), str(body["action"])
+        action = str(body["action"])
+        rel = str(body.get("rel", ""))
     except Exception:
         return err("invalid request")
-    if action not in ("retry", "trash"):
+    if action not in ("retry", "trash", "prune_verified"):
         return err("unknown action")
+
+    if action == "prune_verified":
+        # Bulk cleanup: delete only held files whose name+size exactly matches a
+        # copy already in sorted/. Everything else stays for a human decision.
+        index = _library_name_sizes()
+        removed = 0
+        for f in list(walk_files(QUAR)):
+            try:
+                if f.is_symlink() or f.stat().st_size not in index.get(f.name, set()):
+                    continue
+                f.unlink()
+                removed += 1
+            except OSError:
+                continue
+        for child in list(QUAR.iterdir()):
+            if child.is_dir() and not child.name.startswith("_") and not any(child.iterdir()):
+                child.rmdir()
+        log.info("quarantine prune_verified: removed %d verified duplicates", removed)
+        return no_store({"ok": True, "removed": removed})
+
     try:
         src = safe_child(QUAR, rel)
     except ValueError:

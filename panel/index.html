@@ -592,6 +592,30 @@
   .row-detail { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12px; }
   .row-value { font: 800 24px/1 var(--display); font-variant-numeric: tabular-nums; }
   .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .dup-flag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 6px;
+    border: 1px solid var(--healthy);
+    color: var(--healthy);
+    font: 700 10px/1.4 var(--mono);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .prune-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border: 1px dashed var(--rule-dark);
+    background-color: var(--sheet-2);
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
 
   .button {
     appearance: none;
@@ -1308,12 +1332,19 @@ async function renderDay(date) {
 function quarantineRows(files) {
   if (!files.length) return '<p class="section-copy">No active quarantine files. Nothing is waiting for a retry or deletion decision.</p>';
   return `<div class="register-list">${files.map(file => `<div class="issue-row">
-    <div class="row-main"><div class="row-title">${esc(file.rel)}</div><div class="row-detail">${bytes(file.size)} · held ${age(Math.max(0, Math.round(Date.now() / 1000 - file.mtime)))} ago · original remains recoverable</div></div>
+    <div class="row-main"><div class="row-title">${esc(file.rel)}${file.in_library ? '<span class="dup-flag">Copy in library</span>' : ""}</div><div class="row-detail">${bytes(file.size)} · held ${age(Math.max(0, Math.round(Date.now() / 1000 - file.mtime)))} ago · ${file.in_library ? "an identical copy is already filed" : "no copy found in the library"}</div></div>
     <div class="row-actions">
       <button class="button secondary" type="button" data-quarantine="retry" data-rel="${esc(file.rel)}">Retry validation</button>
       <button class="button danger" type="button" data-quarantine="trash" data-rel="${esc(file.rel)}" data-armed="0">Stage for deletion</button>
     </div>
   </div>`).join("")}</div>`;
+}
+
+function pruneBar(files) {
+  const verified = files.filter(file => file.in_library).length;
+  if (!verified) return "";
+  return `<div class="prune-bar"><span>${verified} ${plural(verified, "file")} ${verified === 1 ? "has" : "have"} an identical copy already filed in the library.</span>
+    <button class="button danger" type="button" data-quarantine="prune_verified" data-rel="" data-armed="0">Prune verified copies</button></div>`;
 }
 
 function decisionRows(pending, presets) {
@@ -1354,7 +1385,7 @@ async function renderAttention() {
 
   view.innerHTML = `<div class="page">${pageHead("Attention", "One place for pipeline alerts, held files, and optional metadata questions. Nothing here deletes an original automatically.", meta)}
     <section class="content-section">${healthNotice}${clearState}
-      <div class="issue-block"><div class="issue-heading"><h2>Held files</h2><p>Retry sends a file back through the full intake checks. Staging moves it under quarantine/_trash for manual cleanup later.</p></div><div class="issue-content">${quarantineRows(active)}</div></div>
+      <div class="issue-block"><div class="issue-heading"><h2>Held files</h2><p>Retry sends a file back through the full intake checks. Staging moves it under quarantine/_trash for manual cleanup later.</p></div><div class="issue-content">${pruneBar(active)}${quarantineRows(active)}</div></div>
       <div class="issue-block"><div class="issue-heading"><h2>Lens decisions</h2><p>A choice updates identity metadata only. Ignoring a question leaves the file unchanged.</p></div><div class="issue-content">${decisionRows(decisions.pending, cfg.lens_presets || [])}</div></div>
       <div class="issue-block"><div class="issue-heading"><h2>Recent answers</h2><p>The latest completed lens questions, whether answered here or through Telegram.</p></div><div class="issue-content">${resolved}</div></div>
     </section>
@@ -1606,7 +1637,9 @@ async function quarantineAction(relativePath, action, button) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rel: relativePath, action }),
     });
-    toast(action === "retry" ? `Sent back through intake → ${result.moved_to}` : `Staged for manual deletion → ${result.moved_to}`);
+    toast(action === "retry" ? `Sent back through intake → ${result.moved_to}`
+      : action === "prune_verified" ? `Pruned ${result.removed} verified duplicate${result.removed === 1 ? "" : "s"} from quarantine`
+      : `Staged for manual deletion → ${result.moved_to}`);
     await renderAttention();
   } catch (error) {
     toast(error.message, true);
@@ -1690,12 +1723,13 @@ view.addEventListener("click", async event => {
     if (quarantine) {
       const action = quarantine.dataset.quarantine;
       const armedRecently = quarantine.dataset.armed === "1" && Date.now() - Number(quarantine.dataset.armedAt || 0) > 400;
-      if (action === "trash" && !armedRecently) {
+      if ((action === "trash" || action === "prune_verified") && !armedRecently) {
         quarantine.dataset.armed = "1";
         quarantine.dataset.armedAt = String(Date.now());
-        quarantine.textContent = "Confirm stage";
+        quarantine.dataset.restingLabel = quarantine.textContent;
+        quarantine.textContent = action === "trash" ? "Confirm stage" : "Confirm prune";
         setTimeout(() => {
-          if (quarantine.isConnected) { quarantine.dataset.armed = "0"; quarantine.textContent = "Stage for deletion"; }
+          if (quarantine.isConnected && quarantine.dataset.armed === "1") { quarantine.dataset.armed = "0"; quarantine.textContent = quarantine.dataset.restingLabel; }
         }, 4000);
         return;
       }
