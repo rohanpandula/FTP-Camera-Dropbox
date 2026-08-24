@@ -3,653 +3,1795 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Local control panel for Camera Dropbox: monitor intake, browse accepted files, resolve exceptions, and tune automations.">
+<meta name="theme-color" content="#e9ece5">
+<meta name="robots" content="noindex,nofollow">
+<meta property="og:title" content="Camera Dropbox">
+<meta property="og:description" content="Your camera sends. This box checks and files.">
 <title>Camera Dropbox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23171a18'/%3E%3Cpath d='M8 32h48' stroke='%23ee3f29' stroke-width='6'/%3E%3Ccircle cx='32' cy='32' r='10' fill='%23e9ece5' stroke='%23171a18' stroke-width='5'/%3E%3C/svg%3E">
 <style>
+  @font-face {
+    font-family: "Big Shoulders";
+    src: url("/assets/big-shoulders.woff2?v=1") format("woff2");
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+  }
+
   :root {
-    /* darkroom / camera-body world */
-    --body: #131110;        /* matte body shell */
-    --plate: #191613;       /* top plate */
-    --raise: #201c18;       /* raised control */
-    --inset: #0e0c0b;       /* input wells */
-    --engrave: #e9e4db;     /* engraved lettering */
-    --halide: #a49c90;      /* secondary silver */
-    --faint: #6f685f;       /* tertiary */
-    --ghost: #4a453e;       /* disabled/placeholder */
-    --safelight: #e6a13c;   /* the one accent */
-    --safelight-dim: rgba(230, 161, 60, .14);
-    --confirm: #6fc06a;     /* viewfinder green */
-    --reject: #d96a57;      /* quarantine red */
-    --hairline: rgba(233, 228, 219, .08);
-    --hairline-strong: rgba(233, 228, 219, .16);
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    --sans: -apple-system, "Helvetica Neue", Inter, Arial, sans-serif;
+    color-scheme: light;
+    --paper: #e9ece5;
+    --sheet: #f8f9f5;
+    --sheet-2: #dfe4dc;
+    --ink: #171a18;
+    --ink-soft: #505751;
+    --ink-faint: #5c645e;
+    --rule: #aeb5ae;
+    --rule-dark: #747b75;
+    --signal: #ee3f29;
+    --signal-dark: #a61f13;
+    --link: #1748c7;
+    --healthy: #08744f;
+    --warning: #9b4a00;
+    --danger: #a61f13;
+    --focus: #1748c7;
+    --display: "Big Shoulders", "Arial Narrow", sans-serif;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    --paper-texture: url("/assets/archival-paper.webp?v=1");
+    --paper-wash: linear-gradient(rgb(233 236 229 / .7), rgb(233 236 229 / .7)), var(--paper-texture);
+    --sheet-wash: linear-gradient(rgb(248 249 245 / .74), rgb(248 249 245 / .74)), var(--paper-texture);
+    --max: 1440px;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    background: var(--body); color: var(--engrave);
-    font: 14px/1.5 var(--sans);
+    margin: 0;
+    min-width: 320px;
+    background-color: var(--paper);
+    background-image: var(--paper-wash);
+    background-size: auto, 512px 512px;
+    color: var(--ink);
+    font: 15px/1.48 var(--sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px 80px; }
+  button, input, select { font: inherit; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+  button { color: inherit; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
 
-  /* ---- header: lamp + wordmark + camera-menu tabs ---- */
-  header {
-    position: sticky; top: 0; z-index: 5;
-    background: color-mix(in srgb, var(--body) 92%, transparent);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--hairline);
+  .skip-link {
+    position: fixed;
+    left: 16px;
+    top: 12px;
+    z-index: 100;
+    padding: 10px 14px;
+    background: var(--ink);
+    color: var(--sheet);
+    transform: translateY(-160%);
+    transition: transform 180ms ease-out;
   }
-  .head-row { max-width: 1000px; margin: 0 auto; padding: 14px 20px 0;
-              display: flex; align-items: center; gap: 12px; }
-  .lamp { width: 10px; height: 10px; border-radius: 50%; background: var(--ghost);
-          transition: background .4s, box-shadow .4s; flex: none; }
-  .lamp.ok   { background: var(--confirm); box-shadow: 0 0 10px 1px rgba(111,192,106,.45); }
-  .lamp.fail { background: var(--reject);  box-shadow: 0 0 10px 1px rgba(217,106,87,.5); }
-  .lamp.unknown { background: var(--safelight); box-shadow: 0 0 8px 1px rgba(230,161,60,.4); }
-  .wordmark { font: 600 12px/1 var(--sans); letter-spacing: .22em; }
-  .wordmark small { color: var(--faint); font-weight: 400; letter-spacing: .18em; margin-left: 10px; }
-  .head-note { margin-left: auto; font: 11px var(--mono); color: var(--faint); }
-  nav { max-width: 1000px; margin: 0 auto; padding: 10px 20px 0; display: flex; gap: 2px; overflow-x: auto; }
-  nav button {
-    appearance: none; background: none; border: 0; cursor: pointer;
-    font: 600 11px/1 var(--sans); letter-spacing: .14em; color: var(--faint);
-    padding: 10px 12px 12px; border-bottom: 2px solid transparent; white-space: nowrap;
+  .skip-link:focus { transform: translateY(0); }
+
+  :focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
   }
-  nav button:hover { color: var(--halide); }
-  nav button.on { color: var(--engrave); border-bottom-color: var(--safelight); }
 
-  main { padding-top: 26px; }
-  h2 { font: 600 11px/1 var(--sans); letter-spacing: .18em; color: var(--faint);
-       text-transform: uppercase; margin: 34px 0 14px; }
-  h2:first-child { margin-top: 0; }
-  .sub { color: var(--faint); font-size: 12.5px; margin-top: -8px; margin-bottom: 14px; }
-
-  /* ---- transport readout (no cards — engraved counters) ---- */
-  .readout { display: flex; flex-wrap: wrap; border-block: 1px solid var(--hairline); }
-  .dial { flex: 1 1 120px; padding: 16px 18px; border-right: 1px solid var(--hairline); min-width: 110px; }
-  .dial:last-child { border-right: 0; }
-  .dial b { display: block; font: 500 26px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
-  .dial span { font: 600 10px/1 var(--sans); letter-spacing: .16em; color: var(--faint); }
-  .dial .unit { font-size: 13px; color: var(--halide); margin-left: 2px; }
-  .dial.hot b { color: var(--safelight); }
-  .dial.bad b { color: var(--reject); }
-
-  /* ---- contact sheet ---- */
-  .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
-  .frame { background: var(--plate); border: 1px solid var(--hairline); border-radius: 5px;
-           overflow: hidden; cursor: default; }
-  .frame .ph { aspect-ratio: 3/2; background: var(--inset); display: grid; place-items: center;
-               color: var(--ghost); font: 10px var(--mono); letter-spacing: .1em; }
-  .frame img { width: 100%; aspect-ratio: 3/2; object-fit: cover; display: block;
-               filter: saturate(.96); }
-  .frame figcaption { padding: 7px 9px 8px; border-top: 1px solid var(--hairline); }
-  .frame .fn { font: 11px var(--mono); letter-spacing: .02em; overflow: hidden;
-               text-overflow: ellipsis; white-space: nowrap; }
-  .frame .fm { font: 10px var(--mono); color: var(--faint); display: flex;
-               justify-content: space-between; margin-top: 2px; }
-  .badge { font: 9px/1 var(--mono); letter-spacing: .08em; color: var(--halide);
-           border: 1px solid var(--hairline-strong); border-radius: 3px; padding: 2px 4px; }
-
-  /* ---- rows (incoming, quarantine, rules, folders) ---- */
-  .rows { border-top: 1px solid var(--hairline); }
-  .row { display: flex; align-items: center; gap: 8px 14px; padding: 11px 4px;
-         border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
-  .row .grow { flex: 1; min-width: 0; }
-  .row .mono, .mono { font: 12.5px var(--mono); font-variant-numeric: tabular-nums; }
-  .row .dim { color: var(--faint); font: 11.5px var(--mono); }
-  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .arrow { color: var(--safelight); padding: 0 2px; }
-
-  /* ---- top-plate switch ---- */
-  .switchrow { display: flex; align-items: flex-start; gap: 16px; padding: 16px 4px;
-               border-bottom: 1px solid var(--hairline); }
-  .switchrow:first-of-type { border-top: 1px solid var(--hairline); }
-  .switchrow .label { font: 600 12px/1.3 var(--sans); letter-spacing: .04em; }
-  .switchrow .desc { color: var(--faint); font-size: 12px; margin-top: 3px; max-width: 60ch; }
-  .sw { margin-left: auto; flex: none; position: relative; width: 58px; height: 26px;
-        border-radius: 13px; border: 1px solid var(--hairline-strong); background: var(--inset);
-        cursor: pointer; transition: background .18s, border-color .18s; }
-  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
-               border-radius: 50%; background: var(--halide); transition: left .18s, background .18s; }
-  .sw::before { content: "OFF"; position: absolute; right: 7px; top: 6px;
-                font: 600 8px/1.2 var(--mono); letter-spacing: .08em; color: var(--ghost); }
-  .sw.on { background: var(--safelight-dim); border-color: var(--safelight); }
-  .sw.on::after { left: 35px; background: var(--safelight); }
-  .sw.on::before { content: "ON"; left: 9px; right: auto; color: var(--safelight); }
-  .sw.busy { opacity: .5; pointer-events: none; }
-
-  /* ---- controls ---- */
-  input[type=text] {
-    background: var(--inset); border: 1px solid var(--hairline-strong); border-radius: 5px;
-    color: var(--engrave); font: 12.5px var(--mono); padding: 8px 10px; width: 100%;
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background-color: var(--paper);
+    background-image: var(--paper-wash);
+    background-size: auto, 512px 512px;
+    border-bottom: 1px solid var(--ink);
   }
-  input[type=text]:focus { outline: none; border-color: var(--safelight); }
-  input::placeholder { color: var(--ghost); }
-  .btn {
-    appearance: none; cursor: pointer; border-radius: 5px; white-space: nowrap;
-    border: 1px solid var(--hairline-strong); background: var(--raise); color: var(--engrave);
-    font: 600 11px/1 var(--sans); letter-spacing: .1em; padding: 9px 14px;
-    transition: border-color .15s, color .15s, background .15s;
+  .header-inner {
+    width: min(100%, var(--max));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(440px, 1fr) minmax(580px, 1fr);
+    grid-template-rows: 84px 28px;
+    grid-template-areas:
+      "brand nav"
+      "state nav";
+    align-items: stretch;
+    min-height: 112px;
   }
-  .btn:hover { border-color: var(--safelight); color: var(--safelight); }
-  .btn.danger:hover { border-color: var(--reject); color: var(--reject); }
-  .btn.quiet { border-color: transparent; background: none; color: var(--faint); padding: 6px 8px; }
-  .btn.quiet:hover { color: var(--engrave); border-color: var(--hairline-strong); }
-  .btn:disabled { opacity: .45; pointer-events: none; }
+  .brand {
+    grid-area: brand;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px clamp(20px, 2.7vw, 40px);
+    color: var(--ink);
+    text-decoration: none;
+    border-right: 1px solid var(--rule-dark);
+  }
+  .brand-mark {
+    position: relative;
+    display: none;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border: 1px solid var(--ink);
+  }
+  .brand-mark::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    right: -1px;
+    top: 12px;
+    height: 4px;
+    background: var(--signal);
+  }
+  .brand-mark::after {
+    content: "";
+    position: absolute;
+    inset: 7px;
+    border-radius: 50%;
+    background: var(--sheet);
+    border: 2px solid var(--ink);
+  }
+  .brand-name {
+    white-space: nowrap;
+    font: 850 clamp(42px, 4.15vw, 60px)/.82 var(--display);
+    letter-spacing: -.025em;
+    text-transform: uppercase;
+  }
+  .brand-name span { display: inline; }
+  .brand-name span + span::before { content: " "; }
 
-  /* rule engraving */
-  .engraving { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
-  .engraving .m { color: var(--halide); }
-  .field-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 12px; align-items: center;
-                padding: 14px; background: var(--plate); border: 1px solid var(--hairline);
-                border-radius: 5px; margin-top: 12px; }
-  .field-grid label { font: 600 10px/1.2 var(--sans); letter-spacing: .12em; color: var(--faint); }
-  .form-foot { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+  .primary-nav { grid-area: nav; display: flex; align-items: stretch; }
+  .primary-nav a {
+    position: relative;
+    min-width: 0;
+    min-height: 112px;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 18px;
+    border-right: 1px solid var(--rule-dark);
+    color: var(--ink);
+    text-decoration: none;
+    font: 750 clamp(18px, 1.7vw, 23px)/1 var(--display);
+    letter-spacing: .01em;
+    text-transform: uppercase;
+    transition: background 180ms ease-out, color 180ms ease-out;
+  }
+  .primary-nav a:first-child { border-left: 1px solid var(--rule-dark); }
+  .primary-nav a:hover { background: var(--sheet-2); }
+  .primary-nav a[aria-current="page"] {
+    background: var(--signal);
+    color: #fff;
+  }
+  .primary-nav a[aria-current="page"]::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    top: -1px;
+    border-top: 14px solid var(--paper);
+    border-left: 14px solid transparent;
+  }
+  .nav-count {
+    min-width: 21px;
+    padding: 3px 5px;
+    border: 1px solid currentColor;
+    font: 700 10px/1 var(--mono);
+    text-align: center;
+  }
 
-  /* camera chip picker */
-  .pickerbox { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 38px;
-               background: var(--inset); border: 1px solid var(--hairline-strong);
-               border-radius: 5px; padding: 6px; }
-  .chip { display: inline-flex; align-items: center; gap: 6px; font: 11.5px var(--mono);
-          border: 1px solid var(--hairline-strong); border-radius: 3px; padding: 4px 7px;
-          background: var(--raise); }
-  .chip b { cursor: pointer; color: var(--faint); font-weight: 400; }
-  .chip b:hover { color: var(--reject); }
-  select.camsel { appearance: none; background: none; border: 1px dashed var(--hairline-strong);
-                  border-radius: 3px; color: var(--faint); font: 600 10.5px var(--sans);
-                  letter-spacing: .08em; padding: 5px 8px; cursor: pointer; max-width: 190px; }
-  select.camsel:hover { color: var(--safelight); border-color: var(--safelight); }
-  input.camcustom { width: 180px !important; padding: 5px 8px; font-size: 11.5px; }
+  .header-state {
+    grid-area: state;
+    justify-self: stretch;
+    min-width: 0;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 4px clamp(20px, 2.7vw, 40px);
+    border-top: 1px solid var(--rule-dark);
+  }
+  .state-dot {
+    width: 10px;
+    height: 10px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--ink-faint);
+  }
+  .state-dot.ok { background: var(--healthy); }
+  .state-dot.fail { background: var(--danger); }
+  .state-dot.active { background: var(--signal); animation: breathe 1.6s ease-in-out infinite; }
+  .header-state-copy strong {
+    display: inline;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .header-state-copy span {
+    display: inline;
+    margin-left: 10px;
+    color: var(--ink-soft);
+    font: 11px/1.35 var(--mono);
+  }
 
-  .empty { color: var(--faint); font: 12.5px var(--mono); padding: 26px 4px; text-align: center;
-           border-block: 1px solid var(--hairline); }
-  .hint { color: var(--ghost); font-size: 11.5px; margin-top: 8px; }
+  main {
+    width: min(100%, var(--max));
+    min-height: calc(100dvh - 113px);
+    margin: 0 auto;
+    background-color: var(--sheet);
+    background-image: var(--sheet-wash);
+    background-size: auto, 512px 512px;
+    border-inline: 1px solid var(--rule-dark);
+  }
+  .page { animation: page-in 360ms cubic-bezier(.16, 1, .3, 1) both; }
+  .page.no-animation { animation: none; }
+  .page-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+    align-items: end;
+    gap: 28px;
+    padding: clamp(28px, 5vw, 64px) clamp(20px, 4vw, 56px) 30px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .page-head h1,
+  .verdict-title {
+    max-width: 13ch;
+    margin: 0;
+    font: 800 clamp(50px, 7vw, 92px)/.88 var(--display);
+    letter-spacing: -.025em;
+    text-wrap: balance;
+  }
+  .page-head p {
+    max-width: 62ch;
+    margin: 14px 0 0;
+    color: var(--ink-soft);
+    font-size: 16px;
+    text-wrap: pretty;
+  }
+  .page-meta {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+    border: 1px solid var(--rule-dark);
+  }
+  .page-meta div { padding: 12px 14px; }
+  .page-meta div + div { border-left: 1px solid var(--rule-dark); }
+  .page-meta dt,
+  .fact-label,
+  .section-label,
+  .meta-label {
+    color: var(--ink-soft);
+    font: 700 10px/1.2 var(--mono);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .page-meta dd {
+    margin: 5px 0 0;
+    font: 700 15px/1.2 var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
 
-  /* library day grid */
-  .daylist .row { cursor: pointer; }
-  .daylist .row:hover { background: var(--plate); }
-  .crumb { color: var(--safelight); cursor: pointer; font: 12px var(--mono); }
+  .verdict-band {
+    display: grid;
+    grid-template-columns: minmax(500px, .9fr) minmax(600px, 1.1fr);
+    border-bottom: 1px solid var(--ink);
+  }
+  .verdict-copy { padding: clamp(28px, 3.2vw, 46px) clamp(24px, 3.2vw, 46px) 28px; }
+  .verdict-title { color: var(--signal); }
+  .verdict-sub {
+    max-width: 58ch;
+    margin: 18px 0 0;
+    color: var(--ink-soft);
+    font-size: clamp(16px, 1.7vw, 21px);
+    text-wrap: pretty;
+  }
+  .verdict-facts {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-left: 1px solid var(--ink);
+  }
+  .verdict-facts > div {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-width: 0;
+    padding: clamp(22px, 2.4vw, 34px);
+  }
+  .verdict-facts > div + div { border-left: 1px solid var(--rule-dark); }
+  .fact-value {
+    display: block;
+    margin-top: 8px;
+    font: 750 clamp(30px, 4vw, 54px)/.95 var(--display);
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .fact-detail {
+    display: block;
+    margin-top: 8px;
+    color: var(--ink-soft);
+    font: 12px/1.45 var(--mono);
+  }
+  .status-good { color: var(--healthy); }
+  .status-bad { color: var(--danger); }
 
-  /* toast */
-  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(6px);
-           background: var(--raise); border: 1px solid var(--hairline-strong); border-radius: 6px;
-           color: var(--engrave); font: 12px var(--mono); padding: 10px 16px; opacity: 0;
-           pointer-events: none; transition: opacity .2s, transform .2s; max-width: 80vw; }
-  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  #toast.bad { border-color: var(--reject); color: var(--reject); }
+  .intake {
+    padding: 18px clamp(24px, 3.2vw, 46px) 20px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .intake-title-row,
+  .section-title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+  .section-title-row h2,
+  .section-title {
+    margin: 0;
+    font: 750 clamp(24px, 3vw, 36px)/1 var(--display);
+    letter-spacing: -.01em;
+    text-transform: uppercase;
+  }
+  .intake-note { color: var(--ink-soft); font: 11px/1.4 var(--mono); }
+  .intake-track {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    isolation: isolate;
+  }
+  .intake-track::before,
+  .intake-track::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    top: 20px;
+    left: 5%;
+    right: 5%;
+    height: 2px;
+    background: var(--rule-dark);
+  }
+  .intake-track.active::after {
+    background: var(--signal);
+    transform-origin: left;
+    animation: intake-line 2.6s cubic-bezier(.16, 1, .3, 1) infinite;
+  }
+  .stage { min-width: 0; text-align: center; }
+  .stage-node {
+    width: 18px;
+    height: 18px;
+    margin: 12px auto 14px;
+    border-radius: 50%;
+    border: 3px solid var(--sheet);
+    background: var(--ink);
+    box-shadow: 0 0 0 1px var(--ink);
+  }
+  .active .stage-node { background: var(--signal); box-shadow: 0 0 0 1px var(--signal); }
+  .stage-name {
+    display: block;
+    font: 750 17px/1 var(--display);
+    text-transform: uppercase;
+  }
+  .stage-value {
+    display: block;
+    margin-top: 6px;
+    font: 700 13px/1.2 var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .stage-detail { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12px; }
 
-  @media (max-width: 560px) {
-    .dial { padding: 12px 12px; }
-    .dial b { font-size: 20px; }
-    .field-grid { grid-template-columns: 1fr; }
+  .now-grid {
+    display: grid;
+    grid-template-columns: minmax(250px, 286px) minmax(0, 1fr);
+    align-items: stretch;
+    border-bottom: 1px solid var(--ink);
+  }
+  .recent { min-width: 0; padding: 26px clamp(22px, 2.5vw, 36px) 30px; }
+  .attention-register {
+    position: relative;
+    padding: 0 22px 30px;
+    background-color: #f1d8d1;
+    background-image: linear-gradient(rgb(241 216 209 / .78), rgb(241 216 209 / .78)), var(--paper-texture);
+    background-size: auto, 512px 512px;
+    border-right: 1px solid var(--ink);
+    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
+  }
+  .attention-register h2 {
+    margin: 0 -22px 12px;
+    padding: 15px 22px 14px;
+    background: var(--signal);
+    color: #fff;
+    font: 800 30px/1 var(--display);
+    text-transform: uppercase;
+  }
+  .attention-item { padding: 16px 0; border-top: 1px solid color-mix(in srgb, var(--danger) 44%, transparent); }
+  .attention-item:first-of-type { border-top-color: var(--danger); }
+  .attention-item strong { display: block; font: 700 20px/1.1 var(--display); }
+  .attention-item p { margin: 7px 0 0; color: #54251f; font-size: 13px; }
+  .attention-clear { margin: 0; color: #2f4d3f; }
+
+  .proof-grid,
+  .library-grid {
+    display: grid;
+    gap: 1px;
+    background: var(--rule-dark);
+    border: 1px solid var(--rule-dark);
+  }
+  .proof-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .library-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .proof-grid {
+    gap: 0;
+    background: transparent;
+    border-right: 0;
+  }
+  .proof-grid .proof { border-right: 1px solid var(--rule-dark); }
+  .proof {
+    min-width: 0;
+    margin: 0;
+    background: var(--sheet);
+  }
+  .proof-media {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: var(--sheet-2);
+  }
+  .proof-media img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    transition: transform 280ms cubic-bezier(.16, 1, .3, 1), filter 280ms ease-out;
+  }
+  .proof:hover img { transform: scale(1.018); filter: contrast(1.03); }
+  .media-placeholder {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    color: var(--ink-soft);
+    font: 700 12px/1.3 var(--mono);
+    letter-spacing: .08em;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .proof figcaption { padding: 14px 14px 16px; }
+  .file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 700 13px/1.25 var(--mono);
+  }
+  .file-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 7px;
+    color: var(--ink-soft);
+    font: 11px/1.25 var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .file-destination {
+    display: inline-block;
+    margin-top: 12px;
+    color: var(--link);
+    font: 700 11px/1.3 var(--mono);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .mechanism {
+    display: grid;
+    grid-template-columns: minmax(220px, .9fr) repeat(4, minmax(0, 1fr));
+    border-bottom: 1px solid var(--ink);
+    counter-reset: protection;
+  }
+  .mechanism-heading {
+    display: flex;
+    align-items: center;
+    padding: 22px clamp(18px, 2.4vw, 34px);
+    font: 800 27px/.95 var(--display);
+    text-transform: uppercase;
+  }
+  .mechanism article {
+    counter-increment: protection;
+    padding: 20px clamp(15px, 1.7vw, 24px) 24px;
+    border-left: 1px solid var(--rule-dark);
+  }
+  .mechanism article::before {
+    content: "0" counter(protection);
+    display: block;
+    margin-bottom: 10px;
+    color: var(--signal-dark);
+    font: 700 10px/1 var(--mono);
+    letter-spacing: .08em;
+  }
+  .mechanism h3 {
+    margin: 0;
+    font: 750 19px/1 var(--display);
+    text-transform: uppercase;
+  }
+  .mechanism p { max-width: 34ch; margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; }
+
+  .empty-state {
+    padding: clamp(36px, 6vw, 82px) clamp(20px, 5vw, 72px);
+    background: var(--sheet-2);
+    border: 1px solid var(--rule-dark);
+  }
+  .empty-state h2 { max-width: 12ch; margin: 0; font: 800 clamp(38px, 5vw, 66px)/.9 var(--display); }
+  .empty-state > p { max-width: 60ch; margin: 14px 0 0; color: var(--ink-soft); }
+  .setup-steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    margin-top: 34px;
+    border-block: 1px solid var(--rule-dark);
+  }
+  .setup-steps article { padding: 20px 20px 24px 0; }
+  .setup-steps article + article { padding-left: 20px; border-left: 1px solid var(--rule-dark); }
+  .setup-steps strong { display: block; font: 750 20px/1 var(--display); text-transform: uppercase; }
+  .setup-steps p { margin: 8px 0 0; color: var(--ink-soft); font-size: 13px; }
+
+  .content-section { padding: 34px clamp(20px, 4vw, 56px) 48px; border-bottom: 1px solid var(--ink); }
+  .content-section + .content-section { padding-top: 48px; }
+  .section-copy { max-width: 68ch; margin: 8px 0 24px; color: var(--ink-soft); text-wrap: pretty; }
+  .text-link,
+  .link-button {
+    appearance: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--link);
+    cursor: pointer;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .text-link:hover, .link-button:hover { color: #0e318c; }
+
+  .register-list { border-top: 1px solid var(--ink); }
+  .register-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    min-height: 62px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  button.register-row {
+    width: 100%;
+    cursor: pointer;
+    background: transparent;
+    border-inline: 0;
+    border-top: 0;
+    text-align: left;
+    transition: background 160ms ease-out;
+  }
+  button.register-row:hover { background: var(--sheet-2); }
+  button.register-row .row-main { transition: transform 180ms cubic-bezier(.16, 1, .3, 1); }
+  button.register-row:hover .row-main { transform: translateX(8px); }
+  .row-main { min-width: 0; }
+  .row-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 700 14px/1.3 var(--mono);
+  }
+  .row-detail { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12px; }
+  .row-value { font: 800 24px/1 var(--display); font-variant-numeric: tabular-nums; }
+  .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+  .button {
+    appearance: none;
+    position: relative;
+    min-height: 42px;
+    padding: 11px 16px;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    background: var(--ink);
+    color: var(--sheet);
+    cursor: pointer;
+    font: 750 14px/1 var(--display);
+    letter-spacing: .025em;
+    text-transform: uppercase;
+    transition: transform 160ms ease-out, background 160ms ease-out, color 160ms ease-out;
+  }
+  .button:hover { background: var(--signal); border-color: var(--signal); }
+  .button:active { transform: translateY(1px); }
+  .button.secondary { background: transparent; color: var(--ink); }
+  .button.secondary:hover { background: var(--sheet-2); border-color: var(--ink); }
+  .button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+  .button.danger:hover { background: var(--danger); color: #fff; }
+  .button.quiet { min-height: 36px; padding: 8px 10px; border-color: transparent; background: transparent; color: var(--link); }
+  .button.quiet:hover { background: var(--sheet-2); border-color: var(--rule-dark); color: var(--ink); }
+  .button:disabled { cursor: wait; opacity: .48; }
+
+  .notice {
+    margin-bottom: 24px;
+    padding: 16px 18px;
+    border: 1px solid var(--warning);
+    background: #f4e3cc;
+    color: #502700;
+  }
+  .notice.danger { border-color: var(--danger); background: #f1d8d1; color: #54251f; }
+  .notice strong { display: block; }
+  .notice p { margin: 4px 0 0; }
+
+  .issue-block {
+    display: grid;
+    grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
+    border-top: 1px solid var(--ink);
+  }
+  .issue-heading { padding: 22px 24px 28px 0; }
+  .issue-heading h2 { margin: 0; font: 800 30px/1 var(--display); text-transform: uppercase; }
+  .issue-heading p { margin: 8px 0 0; color: var(--ink-soft); font-size: 13px; }
+  .issue-content { min-width: 0; padding: 12px 0 34px 24px; border-left: 1px solid var(--rule-dark); }
+  .issue-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .decision-row { grid-template-columns: 108px minmax(0, 1fr); align-items: start; }
+  .decision-thumb { width: 108px; aspect-ratio: 4/3; object-fit: cover; background: var(--sheet-2); }
+  .decision-options { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+  .automation-group {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    border-top: 1px solid var(--ink);
+  }
+  .automation-intro { padding: 24px 28px 30px 0; }
+  .automation-intro h2 { margin: 0; font: 800 30px/1 var(--display); text-transform: uppercase; }
+  .automation-intro p { margin: 10px 0 0; color: var(--ink-soft); font-size: 13px; }
+  .automation-list { border-left: 1px solid var(--rule-dark); }
+  .automation-panel { padding: 24px 0 30px 24px; }
+  .switch-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: center;
+    min-height: 86px;
+    padding: 16px 0 16px 24px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .switch-row strong { display: block; font-size: 15px; }
+  .switch-row p { max-width: 66ch; margin: 5px 0 0; color: var(--ink-soft); font-size: 13px; }
+  .switch {
+    appearance: none;
+    position: relative;
+    width: 76px;
+    height: 38px;
+    flex: none;
+    border: 1px solid var(--ink);
+    border-radius: 0;
+    background: var(--sheet-2);
+    cursor: pointer;
+    transition: background 160ms ease-out;
+  }
+  .switch::before {
+    content: "OFF";
+    position: absolute;
+    top: 13px;
+    right: 9px;
+    color: var(--ink-soft);
+    font: 700 9px/1 var(--mono);
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    left: 4px;
+    top: 4px;
+    background: var(--ink);
+    transition: transform 180ms cubic-bezier(.16, 1, .3, 1), background 160ms ease-out;
+  }
+  .switch[aria-checked="true"] { background: #f4d3cc; border-color: var(--signal); }
+  .switch[aria-checked="true"]::before { content: "ON"; left: 10px; right: auto; color: var(--signal-dark); }
+  .switch[aria-checked="true"]::after { transform: translateX(38px); background: var(--signal); }
+
+  .inline-form { display: flex; align-items: flex-end; gap: 10px; margin-top: 18px; }
+  .field { min-width: 0; }
+  .field.grow { flex: 1; }
+  label, .field-label {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--ink-soft);
+    font: 700 10px/1.2 var(--mono);
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  input[type="text"],
+  input[type="search"],
+  input[type="number"],
+  select {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule-dark);
+    border-radius: 2px;
+    background: var(--sheet);
+    color: var(--ink);
+    font: 13px/1.3 var(--mono);
+  }
+  input::placeholder { color: var(--ink-faint); opacity: 1; }
+  input:focus, select:focus { border-color: var(--focus); outline: 3px solid color-mix(in srgb, var(--focus) 25%, transparent); }
+
+  details.advanced { margin-top: 34px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+  details.advanced > summary {
+    min-height: 66px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    cursor: pointer;
+    list-style: none;
+    font: 800 27px/1 var(--display);
+    text-transform: uppercase;
+  }
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.advanced > summary::after { content: "+"; font: 500 28px/1 var(--mono); }
+  details.advanced[open] > summary::after { content: "−"; }
+  .advanced-body { padding: 0 0 34px; }
+
+  .rule-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .rule-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font: 12px/1.45 var(--mono); }
+  .rule-muted { color: var(--ink-soft); }
+  .rule-arrow { color: var(--signal); font-weight: 800; }
+  .rule-form {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 14px 20px;
+    align-items: start;
+    margin-top: 20px;
+    padding: 22px;
+    background: var(--sheet-2);
+    border: 1px solid var(--rule-dark);
+  }
+  .rule-form .field-label { margin-top: 14px; }
+  .rule-form .field-label:first-child { margin-top: 0; }
+  .field-help { display: block; margin-top: 5px; color: var(--ink-faint); font: 11px/1.35 var(--sans); text-transform: none; letter-spacing: 0; }
+  .form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; padding-top: 6px; }
+  .picker {
+    min-height: 44px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--rule-dark);
+    background: var(--sheet);
+  }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--rule-dark); font: 11px/1 var(--mono); }
+  .chip button { appearance: none; padding: 0; border: 0; background: none; color: var(--danger); cursor: pointer; font-weight: 800; }
+  .picker select { width: auto; min-height: 30px; padding: 4px 28px 4px 7px; border-style: dashed; font-size: 11px; }
+  .picker input { width: min(210px, 100%); min-height: 32px; padding: 5px 7px; }
+  .probe-result { min-height: 22px; margin-top: 10px; color: var(--ink-soft); font: 12px/1.4 var(--mono); }
+
+  .skeleton {
+    min-height: calc(100dvh - 74px);
+    display: grid;
+    align-content: start;
+    gap: 18px;
+    padding: clamp(34px, 6vw, 78px) clamp(20px, 5vw, 66px);
+  }
+  .skeleton-line { height: 18px; max-width: 520px; background: var(--sheet-2); animation: skeleton 1.2s ease-in-out infinite alternate; }
+  .skeleton-line.title { width: min(720px, 80%); height: 72px; }
+  .skeleton-block { height: 240px; margin-top: 24px; border: 1px solid var(--rule); background: var(--paper); animation: skeleton 1.2s ease-in-out infinite alternate; }
+  .route-error { min-height: calc(100dvh - 74px); display: grid; place-items: center; padding: 40px 20px; }
+  .route-error > div { width: min(520px, 100%); padding: 30px; border: 1px solid var(--danger); background: #f1d8d1; }
+  .route-error h1 { margin: 0; font: 800 42px/1 var(--display); }
+  .route-error p { margin: 12px 0 22px; color: #54251f; }
+
+  #toast {
+    position: fixed;
+    z-index: 60;
+    right: 20px;
+    bottom: 20px;
+    width: min(420px, calc(100vw - 40px));
+    padding: 13px 16px;
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--sheet);
+    font: 12px/1.4 var(--mono);
+    opacity: 0;
+    transform: translateY(12px);
+    pointer-events: none;
+    transition: opacity 180ms ease-out, transform 220ms cubic-bezier(.16, 1, .3, 1);
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.bad { border-color: var(--danger); background: var(--danger); color: #fff; }
+  .visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  @keyframes intake-line {
+    0% { clip-path: inset(0 100% 0 0); opacity: .4; }
+    55%, 100% { clip-path: inset(0 0 0 0); opacity: 1; }
+  }
+  @keyframes breathe { 50% { transform: scale(.72); opacity: .55; } }
+  @keyframes page-in { from { opacity: .001; clip-path: inset(0 0 18px 0); } to { opacity: 1; clip-path: inset(0); } }
+  @keyframes skeleton { to { opacity: .52; } }
+
+  @media (max-width: 1099px) {
+    .header-inner {
+      grid-template-columns: auto 1fr auto;
+      grid-template-rows: 72px;
+      grid-template-areas: "brand nav state";
+      min-height: 72px;
+    }
+    .brand { min-width: 170px; }
+    .brand-mark { display: block; }
+    .brand-name { white-space: normal; font-size: 25px; }
+    .brand-name span { display: block; }
+    .brand-name span + span::before { content: none; }
+    .primary-nav a { min-width: 96px; padding-inline: 12px; }
+    .header-state {
+      min-width: 0;
+      min-height: 72px;
+      justify-self: end;
+      justify-content: flex-end;
+      border-top: 0;
+    }
+    .header-state-copy span { display: none; }
+    main { min-height: calc(100dvh - 73px); }
+    .verdict-band { grid-template-columns: 1fr; }
+    .verdict-facts { border-left: 0; border-top: 1px solid var(--ink); }
+    .proof-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .now-grid { grid-template-columns: 240px minmax(0, 1fr); }
+    .mechanism { grid-template-columns: 1fr 1fr; }
+    .mechanism-heading { grid-column: 1 / -1; border-bottom: 1px solid var(--rule-dark); }
+    .mechanism article:nth-of-type(odd) { border-left: 0; }
+    .mechanism article:nth-of-type(n + 3) { border-top: 1px solid var(--rule-dark); }
+  }
+
+  @media (max-width: 760px) {
+    body { padding-bottom: 72px; }
+    .app-header { position: sticky; }
+    .header-inner {
+      min-height: 62px;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: 62px;
+      grid-template-areas: "brand state";
+    }
+    .brand { min-width: 0; padding: 10px 16px; border-right: 0; }
+    .brand-mark { width: 24px; height: 24px; }
+    .brand-mark::before { top: 10px; }
+    .brand-mark::after { inset: 6px; }
+    .brand-name { font-size: 21px; }
+    .primary-nav {
+      grid-area: auto;
+      position: fixed;
+      z-index: 40;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 68px;
+      background: var(--sheet);
+      border-top: 1px solid var(--ink);
+    }
+    .primary-nav a,
+    .primary-nav a:first-child {
+      min-width: 0;
+      min-height: 68px;
+      flex: 1;
+      padding: 0 5px;
+      border-left: 0;
+      border-right: 1px solid var(--rule-dark);
+      font-size: 13px;
+    }
+    .primary-nav a:last-child { border-right: 0; }
+    .primary-nav a[aria-current="page"]::after { border-width: 10px 0 0 10px; }
+    .header-state { min-width: 0; min-height: 62px; padding: 10px 16px; }
+    .header-state-copy strong { font-size: 11px; }
+    .header-state-copy span { display: none; }
+    main { min-height: calc(100dvh - 130px); border-inline: 0; }
+    .page-head { grid-template-columns: 1fr; padding-top: 34px; }
+    .page-head h1, .verdict-title { font-size: clamp(48px, 15vw, 72px); }
+    .page-meta { width: 100%; }
+    .verdict-copy { padding-top: 38px; }
+    .verdict-facts { grid-template-columns: 1fr 1fr; }
+    .verdict-facts > div { padding: 20px; }
+    .fact-value { font-size: 32px; }
+    .fact-detail { font-size: 10px; }
+    .intake { overflow: hidden; }
+    .intake-title-row { align-items: flex-start; flex-direction: column; gap: 7px; }
+    .intake-track { margin-inline: -8px; }
+    .stage-name { font-size: 13px; }
+    .stage-value { font-size: 11px; }
+    .stage-detail { display: none; }
+    .now-grid { grid-template-columns: 1fr; }
+    .attention-register { border-right: 0; border-bottom: 1px solid var(--ink); }
+    .attention-register.is-clear { display: none; }
+    .proof-grid, .library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .proof figcaption { padding: 11px; }
+    .file-name { font-size: 11px; }
+    .file-meta { font-size: 10px; }
+    .file-destination { display: inline-flex; align-items: center; min-height: 44px; margin-top: 2px; }
+    .mechanism { grid-template-columns: 1fr; }
+    .mechanism-heading { grid-column: 1; }
+    .mechanism article,
+    .mechanism article:nth-of-type(odd),
+    .mechanism article:nth-of-type(n + 3) { border-left: 0; border-top: 1px solid var(--rule-dark); }
+    .setup-steps { grid-template-columns: 1fr; }
+    .setup-steps article + article { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule-dark); }
+    .issue-block, .automation-group { grid-template-columns: 1fr; }
+    .issue-heading, .automation-intro { padding-right: 0; }
+    .issue-content, .automation-list { padding-left: 0; border-left: 0; }
+    .automation-panel { padding-left: 0; }
+    .switch-row { padding-left: 0; }
+    .decision-row { grid-template-columns: 80px minmax(0, 1fr); }
+    .decision-thumb { width: 80px; }
+    .rule-form { grid-template-columns: 1fr; padding: 16px; }
+    .rule-form .field-label { margin-top: 0; margin-bottom: -8px; }
+    .form-actions { grid-column: 1; }
+    .inline-form { align-items: stretch; flex-direction: column; }
+    .button { min-height: 44px; }
+    .button.quiet { min-width: 44px; min-height: 44px; }
+    .switch { height: 44px; }
+    .switch::before { top: 16px; }
+    .switch::after { width: 34px; height: 34px; }
+    .switch[aria-checked="true"]::after { transform: translateX(34px); }
+    .picker select,
+    .picker input { min-height: 44px; padding-block: 10px; }
+    .chip { gap: 6px; padding: 0 0 0 8px; }
+    .chip button { display: grid; place-items: center; min-width: 44px; min-height: 44px; }
+    .text-link { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
+    #toast { bottom: 86px; }
+  }
+
+  @media (max-width: 440px) {
+    .header-state-copy { display: none; }
+    .primary-nav a { font-size: 11px; }
+    .nav-count { position: absolute; top: 8px; right: 8px; }
+    .verdict-facts { grid-template-columns: 1fr; }
+    .verdict-facts > div + div { border-left: 0; border-top: 1px solid var(--rule-dark); }
+    .proof-grid, .library-grid { grid-template-columns: 1fr 1fr; }
+    .stage-name { font-size: 11px; }
+    .stage-value { font-size: 10px; }
+    .issue-row, .register-row, .rule-row { grid-template-columns: 1fr; align-items: start; }
+    .row-actions { justify-content: flex-start; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   }
 </style>
 </head>
 <body>
-<header>
-  <div class="head-row">
-    <div class="lamp unknown" id="lamp" title="pipeline health"></div>
-    <div class="wordmark">CAMERA&nbsp;DROPBOX<small id="headnote">—</small></div>
-    <div class="head-note" id="clock"></div>
+<!--
+THESIS: A five-second confidence instrument for irreplaceable files, refusing both the black camera-body dashboard and rounded cloud-storage SaaS.
+OWN-WORLD: Cool archival paper, near-black register ink, ruled accession sheets, clipped index tabs, tabular metadata, and one vermilion intake thread.
+STORY: The operator sees whether files are arriving, understands the wait-check-file mechanism, resolves exceptions, then browses or tunes the workflow.
+FIRST VIEWPORT: A horizontal index frames an oversized truthful verdict; the intake rail crosses the fold, real recent photos dominate below, and one condition report holds every urgent item.
+FORM: Contemporary archive accession ledger, fourth grounded direction, seed 09d695ef; composition approved from .impeccable/mocks/archive-manifest-c.png.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+<a class="skip-link" href="#view">Skip to content</a>
+<header class="app-header">
+  <div class="header-inner">
+    <a class="brand" href="#now" aria-label="Camera Dropbox, Now">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name"><span>Camera</span><span>Dropbox</span></span>
+    </a>
+    <nav class="primary-nav" id="tabs" aria-label="Primary navigation"></nav>
+    <div class="header-state" id="header-state" role="status" aria-live="polite">
+      <span class="state-dot" aria-hidden="true"></span>
+      <span class="header-state-copy"><strong>Checking panel</strong><span>Reading local state</span></span>
+    </div>
   </div>
-  <nav id="tabs"></nav>
 </header>
-<div class="wrap"><main id="view"></main></div>
-<div id="toast"></div>
+<main id="view" tabindex="-1"></main>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 "use strict";
-const $ = (sel, el=document) => el.querySelector(sel);
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const view = $("#view");
 const TABS = [
-  ["overview",   "OVERVIEW"],
-  ["switches",   "SWITCHES"],
-  ["rules",      "LENS RULES"],
-  ["decisions",  "DECISIONS"],
-  ["folders",    "FOLDERS"],
-  ["quarantine", "QUARANTINE"],
+  ["now", "Now"],
+  ["library", "Library"],
+  ["attention", "Attention"],
+  ["automations", "Automations"],
 ];
-// Bump when thumb RENDERING changes: thumbs are cached immutable by URL,
-// so the URL must change for browsers to refetch corrected images.
+const ROUTE_ALIASES = {
+  overview: "now",
+  folders: "library",
+  quarantine: "attention",
+  decisions: "attention",
+  switches: "automations",
+  rules: "automations",
+};
 const THUMB_V = 2;
-let tab = location.hash.slice(1) || "overview";
+let rawRoute = location.hash.slice(1) || "now";
+let tab = normalizeRoute(rawRoute);
+let attentionCount = 0;
 let config = null;
 let pollTimer = null;
-
-/* ---------- plumbing ---------- */
-async function api(path, opts) {
-  const r = await fetch(path, opts);
-  const isJson = (r.headers.get("content-type") || "").includes("json");
-  const body = isJson ? await r.json() : null;
-  if (!r.ok) throw new Error((body && body.error) || `HTTP ${r.status}`);
-  return body;
-}
-function toast(msg, bad=false) {
-  const t = $("#toast");
-  t.textContent = msg; t.classList.toggle("bad", bad); t.classList.add("show");
-  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
-}
-const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-function bytes(n) {
-  if (n == null) return "—";
-  const u = ["B","KB","MB","GB","TB"]; let i = 0;
-  while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
-  return n.toFixed(n >= 100 || i === 0 ? 0 : 1) + " " + u[i];
-}
-function age(s) {
-  if (s < 90) return s + "s";
-  if (s < 5400) return Math.round(s/60) + "m";
-  if (s < 129600) return Math.round(s/3600) + "h";
-  return Math.round(s/86400) + "d";
-}
-const hm = ts => new Date(ts*1000).toTimeString().slice(0,5);
-
-/* ---------- header / tabs ---------- */
-function renderTabs() {
-  $("#tabs").innerHTML = TABS.map(([id, label]) =>
-    `<button class="${id===tab?"on":""}" onclick="go('${id}')">${label}</button>`).join("");
-}
-function go(t) { tab = t; location.hash = t; renderTabs(); render(); }
-window.addEventListener("hashchange", () => {
-  const t = location.hash.slice(1);
-  if (t && t !== tab && TABS.some(([id]) => id === t)) go(t);
-});
-setInterval(() => { $("#clock").textContent = new Date().toTimeString().slice(0,8); }, 1000);
-
-/* ---------- overview ---------- */
-async function renderOverview() {
-  const view = $("#view");
-  view.innerHTML = `<h2>Transport</h2><div id="readout" class="empty">reading…</div>
-    <div id="incoming"></div>
-    <h2>Latest frames</h2><div id="sheet" class="empty">reading…</div>`;
-  await refreshOverview();
-}
-async function refreshOverview() {
-  if (tab !== "overview" || document.hidden) return;
-  try {
-    const [s, r] = await Promise.all([api("/api/status"), api("/api/recent?limit=18")]);
-    const lamp = $("#lamp");
-    lamp.className = "lamp " + s.health.state;
-    lamp.title = s.health.state === "ok" ? "pipeline healthy"
-               : s.health.state === "fail" ? s.health.detail : "healthcheck not mounted";
-    $("#headnote").textContent = s.health.state === "ok" ? "ALL SYSTEMS"
-               : s.health.state === "fail" ? "ATTENTION" : "PANEL ONLY";
-    const freePct = Math.round(100 * s.disk.free / s.disk.total);
-    const inbound = s.incoming.length + s.receiving;
-    $("#readout").outerHTML = `<div class="readout" id="readout">
-      <div class="dial ${inbound ? "hot" : ""}"><b>${inbound}</b><span>INCOMING</span></div>
-      <div class="dial"><b>${s.counts.sorted_today}</b><span>SORTED TODAY</span></div>
-      <div class="dial"><b>${s.counts.queue_depth}</b><span>RENDER QUEUE</span></div>
-      <div class="dial ${s.counts.quarantine_total ? "bad" : ""}"><b>${s.counts.quarantine_total}</b><span>QUARANTINE</span></div>
-      ${s.counts.pending_decisions ? `<div class="dial hot"><b>${s.counts.pending_decisions}</b><span>DECISIONS</span></div>` : ""}
-      <div class="dial"><b>${bytes(s.disk.free)}<span class="unit">free</span></b><span>DISK ${freePct}%</span></div>
-    </div>`;
-    const inc = $("#incoming");
-    if (inbound) {
-      inc.innerHTML = `<h2>On the wire</h2><div class="rows">` +
-        (s.receiving ? `<div class="row"><span class="mono" style="color:var(--safelight)">▸ ${s.receiving} transfer${s.receiving>1?"s":""} receiving…</span></div>` : "") +
-        s.incoming.map(f => `<div class="row"><span class="mono grow name">${esc(f.name)}</span>
-           <span class="dim">${bytes(f.size)}</span><span class="dim">${age(f.age_s)} old</span></div>`).join("") +
-        `</div>`;
-    } else inc.innerHTML = "";
-    const files = r.files;
-    $("#sheet").outerHTML = files.length ? `<figure class="sheet" id="sheet">` + files.map(f => {
-      const canThumb = /\.(nef|arw|raf|dng|nrw|jpe?g|tiff?)$/i.test(f.name);
-      return `<figure class="frame">
-        ${canThumb ? `<img loading="lazy" src="/api/thumb?v=${THUMB_V}&f=${encodeURIComponent(f.rel)}"
-                        onerror="this.outerHTML='<div class=ph>NO PREVIEW</div>'">`
-                   : `<div class="ph">${esc(f.type.toUpperCase())}</div>`}
-        <figcaption><div class="fn">${esc(f.name)}</div>
-        <div class="fm"><span>${hm(f.mtime)}</span><span class="badge">${esc(f.type)}</span></div></figcaption>
-      </figure>`; }).join("") + `</figure>`
-      : `<div class="empty" id="sheet">No frames yet — the strip is blank.</div>`;
-  } catch (e) { toast(e.message, true); }
-}
-
-/* ---------- switches ---------- */
-const SWITCHES = [
-  ["lens_massage", "Lens identity fix",
-   "Rewrite adapted-glass EXIF on new NEFs so Lightroom names the real lens (rules on the Lens Rules tab)."],
-  ["nef_render_queue", "Recipe TIFF renders",
-   "Hard-link new NEFs to the render queue; nef-watch drops a recipe-look TIFF next to each raw."],
-  ["telegram_notifications", "Telegram notifications",
-   "Sort and quarantine digests to your phone. Off = dropped silently, pipeline unaffected."],
-  ["watch_funnel", "Watched-folder funnel",
-   "Sweep extra folders (Folders tab) into incoming/ for normal sorting."],
-  ["ask_on_unknown", "Ask on unknown glass",
-   "When no lens rule matches non-Nikkor glass, ask via Telegram + Decisions tab; unanswered questions auto-close with no changes."],
-];
-function warnInvalid() {
-  if (config && config._invalid) toast("config file on disk was invalid — showing defaults; saving rewrites it", true);
-}
-async function renderSwitches() {
-  config = await api("/api/config");
-  warnInvalid();
-  $("#view").innerHTML = `<h2>Top plate</h2>
-    <p class="sub">Take effect on the next file — no restarts. sort.sh reads this live.</p>` +
-    SWITCHES.map(([key, label, desc]) => `
-      <div class="switchrow">
-        <div><div class="label">${label}</div><div class="desc">${desc}</div></div>
-        <div class="sw ${config.features[key] !== false ? "on" : ""}" id="sw-${key}"
-             role="switch" tabindex="0" onclick="flip('${key}')"
-             onkeydown="if(event.key==' '||event.key==='Enter'){event.preventDefault();flip('${key}')}"></div>
-      </div>`).join("");
-}
-async function flip(key) {
-  const el = $("#sw-" + key);
-  el.classList.add("busy");
-  try {
-    // Send only the flipped key — the server merges per-key, so two quick
-    // toggles can't overwrite each other.
-    config = await api("/api/config", { method: "PUT",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ features: { [key]: !(config.features[key] !== false) } }) });
-    el.classList.toggle("on", config.features[key] !== false);
-    toast(`${key.replaceAll("_", " ")} ${config.features[key] !== false ? "ON" : "OFF"}`);
-  } catch (e) { toast(e.message, true); }
-  el.classList.remove("busy");
-}
-
-/* ---------- lens rules ---------- */
 let CAMERAS = [];
 const pickers = {};
 
-function renderPicker(id) {
-  const box = $("#" + id);
-  if (!box) return;
-  const sel = pickers[id] || [];
-  box.innerHTML = sel.map((c, i) =>
-      `<span class="chip">${esc(c)}<b data-unpick="${id}" data-i="${i}" title="remove">×</b></span>`).join("") +
-    `<select class="camsel" data-pick="${id}">
-       <option value="">+ camera…</option>
-       ${CAMERAS.filter(c => !sel.includes(c.name)).map(c =>
-         `<option value="${esc(c.name)}">${esc(c.name)} · ${c.count}</option>`).join("")}
-       <option value="__custom__">custom…</option>
-     </select>`;
+function normalizeRoute(route) {
+  const normalized = ROUTE_ALIASES[route] || route;
+  return TABS.some(([id]) => id === normalized) ? normalized : "now";
 }
-$("#view").addEventListener("change", e => {
-  const s = e.target.closest("select[data-pick]");
-  if (!s) return;
-  const id = s.dataset.pick;
-  if (s.value === "__custom__") {
-    s.outerHTML = `<input type="text" class="camcustom" data-pickcustom="${id}"
-                     placeholder="substring, e.g. Z f">`;
-    $(`[data-pickcustom="${id}"]`).focus();
-  } else if (s.value) {
-    pickers[id].push(s.value);
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const isJson = (response.headers.get("content-type") || "").includes("json");
+  const body = isJson ? await response.json() : null;
+  if (!response.ok) throw new Error((body && body.error) || `Request failed (${response.status})`);
+  return body;
+}
+
+const esc = value => String(value).replace(/[&<>"']/g, character => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+})[character]);
+
+function bytes(value) {
+  if (value == null) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let unit = 0;
+  let number = Number(value);
+  while (number >= 1024 && unit < units.length - 1) { number /= 1024; unit += 1; }
+  return `${number.toFixed(number >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function age(seconds) {
+  if (seconds < 90) return `${seconds}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 129600) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
+}
+
+const hm = timestamp => new Date(timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const plural = (count, one, many = `${one}s`) => count === 1 ? one : many;
+
+function longDate(date) {
+  try {
+    return new Date(`${date}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  } catch (_) {
+    return date;
+  }
+}
+
+function toast(message, bad = false) {
+  const element = $("#toast");
+  element.textContent = message;
+  element.classList.toggle("bad", bad);
+  element.classList.add("show");
+  clearTimeout(element._hide);
+  element._hide = setTimeout(() => element.classList.remove("show"), 3200);
+}
+
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.map(([id, label]) => {
+    const badge = id === "attention" && attentionCount > 0
+      ? `<span class="nav-count" aria-label="${attentionCount} items">${attentionCount > 99 ? "99+" : attentionCount}</span>`
+      : "";
+    return `<a href="#${id}" ${id === tab ? 'aria-current="page"' : ""}>${label}${badge}</a>`;
+  }).join("");
+}
+
+function activeQuarantine(files) {
+  return files.filter(file => !file.rel.startsWith("_trash/"));
+}
+
+function updateChrome(status, quarantineFiles = []) {
+  const inbound = status.receiving + status.incoming.length;
+  const issues = activeQuarantine(quarantineFiles).length + status.counts.pending_decisions + (status.health.state === "fail" ? 1 : 0);
+  attentionCount = issues;
+  renderTabs();
+
+  let stateClass = "ok";
+  let title = "Monitoring intake";
+  let detail = status.health.detail || "No failures reported";
+  if (status.health.state === "fail") {
+    stateClass = "fail";
+    title = "Pipeline needs attention";
+  } else if (inbound > 0) {
+    stateClass = "active";
+    title = `${inbound} ${plural(inbound, "file")} arriving`;
+    detail = `${status.receiving} receiving · ${status.incoming.length} waiting or checking`;
+  } else if (issues > 0) {
+    stateClass = "fail";
+    title = `${issues} ${plural(issues, "item")} need attention`;
+  }
+  $("#header-state").setAttribute("aria-label", `${title}. ${detail}`);
+  $("#header-state").innerHTML = `<span class="state-dot ${stateClass}" aria-hidden="true"></span>
+    <span class="header-state-copy"><strong>${esc(title)}</strong><span>${esc(detail)}</span></span>`;
+}
+
+async function refreshChrome() {
+  if (document.hidden) return;
+  try {
+    const [status, quarantine] = await Promise.all([api("/api/status"), api("/api/quarantine")]);
+    updateChrome(status, quarantine.files);
+  } catch (_) {
+    $("#header-state").setAttribute("aria-label", "Panel unavailable. Could not read local state.");
+    $("#header-state").innerHTML = `<span class="state-dot fail" aria-hidden="true"></span>
+      <span class="header-state-copy"><strong>Panel unavailable</strong><span>Could not read local state</span></span>`;
+  }
+}
+
+function loadingPage() {
+  view.innerHTML = `<div class="skeleton" aria-label="Loading">
+    <div class="skeleton-line title"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
+    <div class="skeleton-block"></div></div>`;
+}
+
+function routeError(error) {
+  view.innerHTML = `<section class="route-error"><div>
+    <h1>Couldn’t load this view</h1>
+    <p>${esc(error.message)}</p>
+    <button class="button" type="button" data-action="retry-route">Try again</button>
+  </div></section>`;
+}
+
+function pageHead(title, copy, meta = "") {
+  return `<header class="page-head"><div><h1>${esc(title)}</h1><p>${copy}</p></div>${meta}</header>`;
+}
+
+function firstRun() {
+  const host = location.hostname || "this server";
+  return `<div class="empty-state">
+    <h2>Ready for your first camera</h2>
+    <p>Add this box to your camera’s FTP settings, take one frame, and watch it move from intake to the date-sorted library.</p>
+    <div class="setup-steps">
+      <article><strong>Use FTP</strong><p>Server <span class="row-title">${esc(host)}</span>, port <span class="row-title">21</span>, passive mode. Use the credentials configured on this box.</p></article>
+      <article><strong>Turn security off</strong><p>Select FTP—not SFTP or FTPS—and disable secure transfer in the camera menu.</p></article>
+      <article><strong>Send one frame</strong><p>Keep the camera connected while the file settles. Accepted files appear here after structural checks finish.</p></article>
+    </div>
+  </div>`;
+}
+
+function canPreview(name) {
+  return /\.(nef|arw|raf|dng|nrw|cr2|cr3|jpe?g|tiff?)$/i.test(name);
+}
+
+function proofCard(file, options = {}) {
+  const preview = canPreview(file.name)
+    ? `<img class="preview-image" loading="lazy" src="/api/thumb?v=${THUMB_V}&amp;f=${encodeURIComponent(file.rel)}" alt="Preview of ${esc(file.name)}" data-placeholder="No preview">`
+    : `<div class="media-placeholder">${esc((file.type || "file").toUpperCase())}</div>`;
+  const destination = options.destination === false ? "" : `<button class="link-button file-destination" type="button" data-day="${esc(file.date)}">Filed ${esc(file.date)} / ${esc(file.type)}</button>`;
+  return `<figure class="proof"><div class="proof-media">${preview}</div><figcaption>
+    <div class="file-name" title="${esc(file.name)}">${esc(file.name)}</div>
+    <div class="file-meta"><span>${esc((file.type || "file").toUpperCase())}</span><span>${hm(file.mtime)}</span></div>
+    ${destination}
+  </figcaption></figure>`;
+}
+
+function attentionRegister(status, quarantineFiles) {
+  const quarantine = activeQuarantine(quarantineFiles);
+  const decisions = status.counts.pending_decisions;
+  const items = [];
+  if (status.health.state === "fail") items.push(`<div class="attention-item"><strong>Pipeline alert</strong><p>${esc(status.health.detail || "The health check reported a problem.")}</p></div>`);
+  if (quarantine.length) items.push(`<div class="attention-item"><strong>${quarantine.length} ${plural(quarantine.length, "file")} held</strong><p>Held files stay recoverable until you retry or stage them for deletion.</p></div>`);
+  if (decisions) items.push(`<div class="attention-item"><strong>${decisions} lens ${plural(decisions, "decision")}</strong><p>Unanswered questions leave the original metadata unchanged.</p></div>`);
+  return `<aside class="attention-register ${items.length ? "has-issues" : "is-clear"}" aria-labelledby="attention-title">
+    <h2 id="attention-title">Attention</h2>
+    ${items.length ? items.join("") + '<a class="text-link" href="#attention">Review attention</a>' : '<p class="attention-clear"><strong>Nothing needs you.</strong><br>Held files and metadata questions will appear here.</p>'}
+  </aside>`;
+}
+
+async function renderNow({ loading = true } = {}) {
+  if (loading) loadingPage();
+  const [status, recent, quarantine] = await Promise.all([
+    api("/api/status"), api("/api/recent?limit=12"), api("/api/quarantine"),
+  ]);
+  if (tab !== "now") return;
+  updateChrome(status, quarantine.files);
+
+  const inbound = status.receiving + status.incoming.length;
+  const quarantineOpen = activeQuarantine(quarantine.files).length;
+  const issueCount = quarantineOpen + status.counts.pending_decisions + (status.health.state === "fail" ? 1 : 0);
+  let title = "Ready for your next upload";
+  let sub = "Your camera sends. This box waits, checks the file structure, and files accepted media by capture date.";
+  if (status.health.state === "fail") {
+    title = "The pipeline needs attention";
+    sub = "Your files stay in place while you review the reported problem. No held file is deleted automatically.";
+  } else if (inbound > 0) {
+    title = `${inbound} ${plural(inbound, "file")} ${inbound === 1 ? "is" : "are"} arriving`;
+    sub = "Leave the camera connected. New files remain in intake until writes settle and structural checks finish.";
+  } else if (issueCount > 0) {
+    title = `${issueCount} ${plural(issueCount, "item")} need attention`;
+    sub = "Accepted files are already in the library. Review held transfers or optional lens metadata questions when you’re ready.";
+  }
+
+  const freePercent = status.disk.total ? Math.round(status.disk.free / status.disk.total * 100) : 0;
+  const healthClass = status.health.state === "fail" ? "status-bad" : "status-good";
+  const healthValue = status.health.state === "fail" ? "Attention" : "Monitoring";
+  const recentFiles = recent.files.slice(0, 12);
+  const recentMarkup = recentFiles.length
+    ? `<div class="proof-grid">${recentFiles.map(file => proofCard(file)).join("")}</div>`
+    : firstRun();
+
+  view.innerHTML = `<div class="page ${loading ? "" : "no-animation"}">
+    <section class="verdict-band" aria-labelledby="now-verdict">
+      <div class="verdict-copy"><h1 class="verdict-title" id="now-verdict">${esc(title)}</h1><p class="verdict-sub">${esc(sub)}</p></div>
+      <dl class="verdict-facts">
+        <div><dt class="fact-label">Pipeline evidence</dt><dd class="fact-value ${healthClass}">${healthValue}</dd><span class="fact-detail">${esc(status.health.detail || "No failures reported")}</span></div>
+        <div><dt class="fact-label">Storage available</dt><dd class="fact-value">${bytes(status.disk.free)}</dd><span class="fact-detail">${freePercent}% of ${bytes(status.disk.total)} available</span></div>
+      </dl>
+    </section>
+    <section class="intake" aria-labelledby="intake-title">
+      <div class="intake-title-row"><h2 class="section-title" id="intake-title">How intake stands now</h2><span class="intake-note">Activity line shows aggregate intake, not per-file progress.</span></div>
+      <div class="intake-track ${inbound ? "active" : ""}">
+        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Camera</span><span class="stage-value">Wi-Fi FTP</span><span class="stage-detail">Native camera transfer</span></div>
+        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Receiving</span><span class="stage-value">${status.receiving} ${plural(status.receiving, "file")}</span><span class="stage-detail">Still writing to intake</span></div>
+        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Waiting / checking</span><span class="stage-value">${status.incoming.length} ${plural(status.incoming.length, "file")}</span><span class="stage-detail">Settling or being validated</span></div>
+        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Filed by date</span><span class="stage-value">${status.counts.sorted_today} dated today</span><span class="stage-detail">Capture date, not arrival time</span></div>
+      </div>
+      ${inbound ? `<div class="register-list" aria-label="Files currently in intake">${status.incoming.map(file => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(file.name)}</div><div class="row-detail">Waiting or checking · ${age(file.age_s)} in intake</div></div><span class="row-value">${bytes(file.size)}</span></div>`).join("")}</div>` : ""}
+    </section>
+    <section class="now-grid">
+      ${attentionRegister(status, quarantine.files)}
+      <div class="recent"><div class="section-title-row"><h2>Recently accepted</h2>${recent.files.length ? '<a class="text-link" href="#library">Open library</a>' : ""}</div>${recentMarkup}</div>
+    </section>
+    <section class="mechanism" aria-labelledby="protection-title">
+      <header class="mechanism-heading" id="protection-title">Protection by design</header>
+      <article><h3>Waits for stability</h3><p>Fresh uploads must stop changing before the sorter moves on.</p></article>
+      <article><h3>Checks file structure</h3><p>RAW, image, HEIF, and video payloads get format-specific integrity checks.</p></article>
+      <article><h3>Never overwrites</h3><p>Name collisions create a suffixed copy. The existing file stays untouched.</p></article>
+      <article><h3>Files by capture date</h3><p>Accepted media lands under its recorded photo date and file type.</p></article>
+    </section>
+  </div>`;
+}
+
+async function renderLibrary() {
+  loadingPage();
+  const library = await api("/api/library");
+  if (tab !== "library") return;
+  const fileTotal = library.days.reduce((sum, day) => sum + day.total, 0);
+  const meta = `<dl class="page-meta"><div><dt>Capture dates</dt><dd>${library.days.length}</dd></div><div><dt>Files indexed</dt><dd>${fileTotal}</dd></div></dl>`;
+  const body = library.days.length
+    ? `<div class="register-list">${library.days.map(day => {
+        const types = Object.entries(day.types).map(([type, count]) => `${esc(type)} ${count}`).join(" · ") || "No supported files";
+        return `<button class="register-row" type="button" data-day="${esc(day.date)}">
+          <span class="row-main"><span class="row-title">${esc(longDate(day.date))}</span><span class="row-detail">${types}</span></span>
+          <span class="row-value">${day.total}</span>
+        </button>`;
+      }).join("")}</div>`
+    : firstRun();
+  view.innerHTML = `<div class="page">${pageHead("Library", "Accepted files grouped by the date recorded by the camera—not the day they happened to arrive.", meta)}
+    <section class="content-section"><div class="section-title-row"><h2>Capture dates</h2><span class="intake-note">Newest first</span></div>${body}</section>
+  </div>`;
+}
+
+async function renderDay(date) {
+  loadingPage();
+  const day = await api(`/api/library/${encodeURIComponent(date)}`);
+  if (tab !== "library") return;
+  const files = day.files.map(file => ({ ...file, date }));
+  const typeCount = new Set(files.map(file => file.type)).size;
+  const meta = `<dl class="page-meta"><div><dt>Files</dt><dd>${files.length}</dd></div><div><dt>Media groups</dt><dd>${typeCount}</dd></div></dl>`;
+  view.innerHTML = `<div class="page">${pageHead(longDate(date), "Every file below passed through the intake pipeline and is shown in its capture-date folder.", meta)}
+    <section class="content-section">
+      <div class="section-title-row"><button class="button secondary" type="button" data-action="back-library">Back to dates</button><span class="intake-note">${esc(date)}</span></div>
+      ${files.length ? `<div class="library-grid">${files.map(file => proofCard(file, { destination: false })).join("")}</div>` : '<div class="empty-state"><h2>This date is empty</h2><p>No supported media files are currently visible in this folder.</p></div>'}
+    </section>
+  </div>`;
+}
+
+function quarantineRows(files) {
+  if (!files.length) return '<p class="section-copy">No active quarantine files. Nothing is waiting for a retry or deletion decision.</p>';
+  return `<div class="register-list">${files.map(file => `<div class="issue-row">
+    <div class="row-main"><div class="row-title">${esc(file.rel)}</div><div class="row-detail">${bytes(file.size)} · held ${age(Math.max(0, Math.round(Date.now() / 1000 - file.mtime)))} ago · original remains recoverable</div></div>
+    <div class="row-actions">
+      <button class="button secondary" type="button" data-quarantine="retry" data-rel="${esc(file.rel)}">Retry validation</button>
+      <button class="button danger" type="button" data-quarantine="trash" data-rel="${esc(file.rel)}" data-armed="0">Stage for deletion</button>
+    </div>
+  </div>`).join("")}</div>`;
+}
+
+function decisionRows(pending, presets) {
+  if (!pending.length) return '<p class="section-copy">No lens questions are open. Files with known or untouched lens metadata need no decision.</p>';
+  return pending.map(question => `<div class="issue-row decision-row">
+    <img class="decision-thumb preview-image" loading="lazy" src="/api/thumb?v=${THUMB_V}&amp;f=${encodeURIComponent(question.rel)}" alt="Preview of ${esc(question.rel)}" data-placeholder="No preview">
+    <div class="row-main">
+      <div class="row-title">${esc(question.rel)}</div>
+      <div class="row-detail">${question.camera ? `${esc(question.camera)} · ` : ""}Lens ${esc(question.lens || "unknown")} · Lens ID ${esc(question.lensid || "unknown")}</div>
+      <div class="decision-options">
+        ${presets.map((preset, index) => `<button class="button secondary" type="button" data-decision="${esc(question.id)}" data-choice="${index}">${esc(preset.label)}</button>`).join("")}
+        <button class="button quiet" type="button" data-decision="${esc(question.id)}" data-choice="skip">Leave metadata unchanged</button>
+      </div>
+    </div>
+  </div>`).join("");
+}
+
+async function renderAttention() {
+  loadingPage();
+  const [status, quarantine, decisions, cfg] = await Promise.all([
+    api("/api/status"), api("/api/quarantine"), api("/api/decisions"), api("/api/config"),
+  ]);
+  if (tab !== "attention") return;
+  config = cfg;
+  const active = activeQuarantine(quarantine.files);
+  const issueTotal = active.length + decisions.pending.length + (status.health.state === "fail" ? 1 : 0);
+  updateChrome(status, quarantine.files);
+  const meta = `<dl class="page-meta"><div><dt>Needs action</dt><dd>${issueTotal}</dd></div><div><dt>Pending questions</dt><dd>${decisions.pending.length}</dd></div></dl>`;
+  const healthNotice = status.health.state === "fail"
+    ? `<div class="notice danger"><strong>Pipeline health check reported a problem</strong><p>${esc(status.health.detail || "Review the host health check for details.")}</p></div>`
+    : "";
+  const clearState = issueTotal === 0
+    ? '<div class="empty-state"><h2>Nothing needs you</h2><p>Accepted files are in the library. Held transfers and optional lens questions will appear here when intervention is useful.</p></div>'
+    : "";
+  const resolved = decisions.resolved.length
+    ? `<div class="register-list">${decisions.resolved.map(item => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(item.rel || "Unknown file")}</div><div class="row-detail">${esc(item.outcome || "Resolved")} · via ${esc(item.via || "panel")}</div></div></div>`).join("")}</div>`
+    : '<p class="section-copy">No recent lens decisions are recorded.</p>';
+
+  view.innerHTML = `<div class="page">${pageHead("Attention", "One place for pipeline alerts, held files, and optional metadata questions. Nothing here deletes an original automatically.", meta)}
+    <section class="content-section">${healthNotice}${clearState}
+      <div class="issue-block"><div class="issue-heading"><h2>Held files</h2><p>Retry sends a file back through the full intake checks. Staging moves it under quarantine/_trash for manual cleanup later.</p></div><div class="issue-content">${quarantineRows(active)}</div></div>
+      <div class="issue-block"><div class="issue-heading"><h2>Lens decisions</h2><p>A choice updates identity metadata only. Ignoring a question leaves the file unchanged.</p></div><div class="issue-content">${decisionRows(decisions.pending, cfg.lens_presets || [])}</div></div>
+      <div class="issue-block"><div class="issue-heading"><h2>Recent answers</h2><p>The latest completed lens questions, whether answered here or through Telegram.</p></div><div class="issue-content">${resolved}</div></div>
+    </section>
+  </div>`;
+}
+
+const SWITCHES = {
+  lens_massage: {
+    label: "Apply lens metadata rules",
+    description: "Rewrite identity tags for matching adapted lenses on new NEFs. Exposure values are never changed.",
+  },
+  nef_render_queue: {
+    label: "Create recipe TIFF renders",
+    description: "Send new NEFs to the configured render queue so the host workflow can place a recipe-look TIFF beside the raw.",
+  },
+  telegram_notifications: {
+    label: "Send Telegram digests",
+    description: "Send batched sort and quarantine summaries when Telegram credentials are mounted on the host.",
+  },
+  watch_funnel: {
+    label: "Watch extra folders",
+    description: "Move settled files from the folders below into the normal intake pipeline.",
+  },
+  ask_on_unknown: {
+    label: "Ask about unknown lenses",
+    description: "Create an Attention item for unmatched non-Nikkor glass. Unanswered questions close without changing the file.",
+  },
+};
+
+function switchRow(key) {
+  const item = SWITCHES[key];
+  const on = config.features[key] !== false;
+  return `<div class="switch-row"><div><strong>${esc(item.label)}</strong><p>${esc(item.description)}</p></div>
+    <button class="switch" type="button" role="switch" aria-checked="${on}" aria-label="${esc(item.label)}" data-switch="${key}"></button></div>`;
+}
+
+function watchedFoldersMarkup() {
+  const folders = config.watched_folders || [];
+  return `<div class="automation-panel">
+    <div class="section-title-row"><h3 class="section-title">Folder register</h3><span class="intake-note">Paths must live under /data</span></div>
+    ${folders.length ? `<div class="register-list">${folders.map((path, index) => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(path)}</div><div class="row-detail">Settled files enter the same validation and sorting pipeline.</div></div><button class="button quiet" type="button" data-remove-folder="${index}">Stop watching</button></div>`).join("")}</div>` : '<p class="section-copy">No extra folders are registered. Camera uploads still arrive through incoming/.</p>'}
+    <form class="inline-form" id="folder-form">
+      <div class="field grow"><label for="folder-path">Add a folder under /data</label><input type="text" id="folder-path" name="folder" placeholder="/data/drop-here" autocomplete="off" required></div>
+      <button class="button" type="submit">Watch folder</button>
+    </form>
+  </div>`;
+}
+
+function ruleRows() {
+  const rules = config.lens_rules || [];
+  if (!rules.length) return '<p class="section-copy">No rules are registered. Lens identity metadata passes through untouched.</p>';
+  return `<div class="register-list">${rules.map((rule, index) => {
+    const action = rule.lens_model || (rule.set_focal_length ? `${rule.set_focal_length}mm focal length` : "Lens metadata update");
+    return `<div class="rule-row"><div class="rule-code">
+      <span>${rule.match_lens.map(esc).join(" · ")}</span>
+      ${rule.match_lens_id_regex ? `<span class="rule-muted">Lens ID ~ ${esc(rule.match_lens_id_regex)}</span>` : ""}
+      ${rule.match_camera ? `<span class="rule-muted">on ${rule.match_camera.map(esc).join(", ")}</span>` : ""}
+      ${rule.exclude_camera ? `<span class="rule-muted">except ${rule.exclude_camera.map(esc).join(", ")}</span>` : ""}
+      <span class="rule-arrow">→</span><span>${esc(action)}</span>
+      ${rule.lens_info ? `<span class="rule-muted">[${esc(rule.lens_info)}]</span>` : ""}
+    </div><div class="row-actions">
+      <button class="button quiet" type="button" data-edit-rule="${index}">Edit</button>
+      <button class="button quiet" type="button" data-delete-rule="${index}" data-armed="0">Delete</button>
+    </div></div>`;
+  }).join("")}</div>`;
+}
+
+function lensRulesMarkup(forceOpen) {
+  return `<div class="automation-panel">
+    <details class="advanced" id="lens-rules" ${forceOpen ? "open" : ""}>
+      <summary>Advanced lens rules</summary>
+      <div class="advanced-body">
+        <p class="section-copy">The first matching EXIF Lens signature wins. Camera filters narrow a rule to specific bodies; identity tags only, never exposure.</p>
+        ${ruleRows()}
+        <div class="row-actions"><button class="button" type="button" data-edit-rule="-1">Add lens rule</button></div>
+        <div id="rule-form"></div>
+        <div class="section-title-row"><h3 class="section-title">Test a signature</h3></div>
+        <div class="inline-form">
+          <div class="field"><label for="rule-probe">EXIF Lens value</label><input type="text" id="rule-probe" placeholder="50mm f/1.3" autocomplete="off"></div>
+          <div class="field"><label for="rule-camera">Camera body (optional)</label><input type="text" id="rule-camera" list="camera-list" placeholder="NIKON Z f" autocomplete="off"></div>
+          <datalist id="camera-list">${CAMERAS.map(camera => `<option value="${esc(camera.name)}"></option>`).join("")}</datalist>
+        </div>
+        <div class="probe-result" id="probe-result" aria-live="polite"></div>
+      </div>
+    </details>
+  </div>`;
+}
+
+async function renderAutomations() {
+  loadingPage();
+  const [cfg, cameras] = await Promise.all([
+    api("/api/config"), api("/api/cameras").catch(() => ({ cameras: [] })),
+  ]);
+  if (tab !== "automations") return;
+  config = cfg;
+  CAMERAS = cameras.cameras || [];
+  const enabled = Object.values(config.features).filter(Boolean).length;
+  const meta = `<dl class="page-meta"><div><dt>Enabled</dt><dd>${enabled} / ${Object.keys(SWITCHES).length}</dd></div><div><dt>Lens rules</dt><dd>${config.lens_rules.length}</dd></div></dl>`;
+  const invalid = config._invalid ? `<div class="notice danger"><strong>The saved configuration could not be read</strong><p>Defaults are shown. The next successful change will replace the invalid file with a validated configuration.</p></div>` : "";
+  const forceRules = rawRoute === "rules";
+
+  view.innerHTML = `<div class="page">${pageHead("Automations", "Tune what happens after a file arrives. Changes apply to the next file; the intake pipeline does not restart.", meta)}
+    <section class="content-section">${invalid}
+      <div class="notice"><strong>Enabled is not the same as configured</strong><p>This panel stores intent. Host-mounted queues and credentials are not visible to the current API, so confirm render and Telegram prerequisites in Docker when you first enable them.</p></div>
+      <div class="automation-group"><div class="automation-intro"><h2>File intake</h2><p>Bring files in from folders beyond the camera FTP inbox.</p></div><div class="automation-list">${switchRow("watch_funnel")}${watchedFoldersMarkup()}</div></div>
+      <div class="automation-group"><div class="automation-intro"><h2>Outputs</h2><p>Create optional derivatives and low-noise phone summaries.</p></div><div class="automation-list">${switchRow("nef_render_queue")}${switchRow("telegram_notifications")}</div></div>
+      <div class="automation-group"><div class="automation-intro"><h2>Lens metadata</h2><p>Name adapted glass consistently without touching exposure values.</p></div><div class="automation-list">${switchRow("lens_massage")}${switchRow("ask_on_unknown")}${lensRulesMarkup(forceRules)}</div></div>
+    </section>
+  </div>`;
+  if (forceRules) requestAnimationFrame(() => $("#lens-rules")?.scrollIntoView({ block: "start" }));
+}
+
+async function flipSwitch(key, button) {
+  button.disabled = true;
+  const next = !(config.features[key] !== false);
+  try {
+    config = await api("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ features: { [key]: next } }),
+    });
+    button.setAttribute("aria-checked", String(config.features[key] !== false));
+    toast(`${SWITCHES[key].label}: ${config.features[key] !== false ? "on" : "off"}`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function addFolder(path) {
+  if (config.watched_folders.includes(path)) {
+    toast("That folder is already registered", true);
+    return;
+  }
+  config = await api("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ watched_folders: [...config.watched_folders, path] }),
+  });
+  toast(`Watching ${path}`);
+  await renderAutomations();
+}
+
+async function removeFolder(index) {
+  const removed = config.watched_folders[index];
+  config = await api("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ watched_folders: config.watched_folders.filter((_, itemIndex) => itemIndex !== index) }),
+  });
+  toast(`Stopped watching ${removed}`);
+  await renderAutomations();
+}
+
+function renderPicker(id) {
+  const box = $(`#${id}`);
+  if (!box) return;
+  const selected = pickers[id] || [];
+  box.innerHTML = selected.map((camera, index) => `<span class="chip">${esc(camera)}<button type="button" data-unpick="${id}" data-index="${index}" aria-label="Remove ${esc(camera)}">×</button></span>`).join("") +
+    `<select data-picker="${id}" aria-label="Add camera filter"><option value="">Add camera…</option>
+      ${CAMERAS.filter(camera => !selected.includes(camera.name)).map(camera => `<option value="${esc(camera.name)}">${esc(camera.name)} · ${camera.count}</option>`).join("")}
+      <option value="__custom__">Custom substring…</option></select>`;
+}
+
+function editRule(index) {
+  const rule = index >= 0 ? config.lens_rules[index] : {};
+  const form = $("#rule-form");
+  form.innerHTML = `<form class="rule-form" id="lens-rule-form" data-rule-index="${index}">
+    <label class="field-label" for="rule-match">Match Lens values<span class="field-help">Comma-separated exact EXIF Lens strings.</span></label><input type="text" id="rule-match" value="${esc((rule.match_lens || []).join(", "))}" placeholder="50mm f/1.2, 50mm f/1.3" required>
+    <label class="field-label" for="rule-regex">Lens ID regular expression<span class="field-help">Optional POSIX ERE. \\d and (?:…) are not supported by the sorter.</span></label><input type="text" id="rule-regex" value="${esc(rule.match_lens_id_regex || "")}" placeholder="Leica.*35">
+    <span class="field-label">Only these cameras<span class="field-help">Blank matches every body.</span></span><div class="picker" id="rule-include"></div>
+    <span class="field-label">Never these cameras</span><div class="picker" id="rule-exclude"></div>
+    <label class="field-label" for="rule-model">Set lens model</label><input type="text" id="rule-model" value="${esc(rule.lens_model || "")}" placeholder="FE 50mm F1.2 GM">
+    <label class="field-label" for="rule-info">Set lens info</label><input type="text" id="rule-info" value="${esc(rule.lens_info || "")}" placeholder="50 50 1.2 1.2">
+    <label class="field-label" for="rule-focal">Set focal length</label><input type="text" id="rule-focal" value="${esc(rule.set_focal_length || "")}" placeholder="35">
+    <div class="form-actions"><button class="button secondary" type="button" data-action="cancel-rule">Cancel</button><button class="button" type="submit">Save rule</button></div>
+  </form>`;
+  pickers["rule-include"] = [...(rule.match_camera || [])];
+  pickers["rule-exclude"] = [...(rule.exclude_camera || [])];
+  renderPicker("rule-include");
+  renderPicker("rule-exclude");
+  $("#rule-match")?.focus();
+}
+
+function readRuleForm() {
+  const rule = {};
+  const match = $("#rule-match").value.split(",").map(value => value.trim()).filter(Boolean);
+  if (match.length) rule.match_lens = match;
+  const regex = $("#rule-regex").value.trim();
+  if (regex) rule.match_lens_id_regex = regex;
+  if ((pickers["rule-include"] || []).length) rule.match_camera = [...pickers["rule-include"]];
+  if ((pickers["rule-exclude"] || []).length) rule.exclude_camera = [...pickers["rule-exclude"]];
+  const model = $("#rule-model").value.trim();
+  if (model) rule.lens_model = model;
+  const info = $("#rule-info").value.trim();
+  if (info) rule.lens_info = info;
+  const focal = $("#rule-focal").value.trim();
+  if (focal) rule.set_focal_length = focal;
+  return rule;
+}
+
+async function saveRule(index) {
+  const rules = [...config.lens_rules];
+  const rule = readRuleForm();
+  if (index >= 0) rules[index] = rule;
+  else rules.push(rule);
+  config = await api("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lens_rules: rules }),
+  });
+  toast(index >= 0 ? "Lens rule updated" : "Lens rule added");
+  await renderAutomations();
+}
+
+async function deleteRule(index) {
+  config = await api("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lens_rules: config.lens_rules.filter((_, ruleIndex) => ruleIndex !== index) }),
+  });
+  toast("Lens rule deleted");
+  await renderAutomations();
+}
+
+function probeRule() {
+  const result = $("#probe-result");
+  if (!result || !config) return;
+  const signature = $("#rule-probe")?.value.trim() || "";
+  const camera = ($("#rule-camera")?.value || "").trim().toLowerCase();
+  if (!signature) { result.textContent = ""; return; }
+  const cameraMatches = rule =>
+    (!rule.match_camera || rule.match_camera.some(value => camera.includes(value.toLowerCase()))) &&
+    (!rule.exclude_camera || !rule.exclude_camera.some(value => camera.includes(value.toLowerCase())));
+  const hit = config.lens_rules.find(rule => rule.match_lens.includes(signature) && cameraMatches(rule));
+  const cameraExcluded = config.lens_rules.some(rule => rule.match_lens.includes(signature) && !cameraMatches(rule));
+  result.textContent = hit
+    ? `Matches → ${hit.lens_model || `${hit.set_focal_length}mm focal length`}${hit.match_lens_id_regex ? ` if Lens ID matches ${hit.match_lens_id_regex}` : ""}`
+    : `No rule matches; the file stays unchanged${cameraExcluded ? " (a rule exists, but excludes this camera)" : ""}.`;
+  result.className = `probe-result ${hit ? "status-good" : ""}`;
+}
+
+async function quarantineAction(relativePath, action, button) {
+  button.disabled = true;
+  try {
+    const result = await api("/api/quarantine/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rel: relativePath, action }),
+    });
+    toast(action === "retry" ? `Sent back through intake → ${result.moved_to}` : `Staged for manual deletion → ${result.moved_to}`);
+    await renderAttention();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+  }
+}
+
+async function resolveDecision(id, choice, button) {
+  button.disabled = true;
+  try {
+    const result = await api("/api/decision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, choice }),
+    });
+    toast(result.outcome || "Lens decision saved");
+    await renderAttention();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+  }
+}
+
+view.addEventListener("error", event => {
+  const image = event.target.closest?.("img.preview-image");
+  if (!image) return;
+  const placeholder = document.createElement("div");
+  placeholder.className = image.classList.contains("decision-thumb") ? "decision-thumb media-placeholder" : "media-placeholder";
+  placeholder.textContent = image.dataset.placeholder || "No preview";
+  image.replaceWith(placeholder);
+}, true);
+
+view.addEventListener("click", async event => {
+  const target = event.target;
+  try {
+    const retry = target.closest("[data-action='retry-route']");
+    if (retry) { await render(); return; }
+
+    const day = target.closest("[data-day]");
+    if (day) { await renderDay(day.dataset.day); return; }
+
+    if (target.closest("[data-action='back-library']")) { await renderLibrary(); return; }
+
+    const switchButton = target.closest("[data-switch]");
+    if (switchButton) { await flipSwitch(switchButton.dataset.switch, switchButton); return; }
+
+    const folderButton = target.closest("[data-remove-folder]");
+    if (folderButton) { await removeFolder(Number(folderButton.dataset.removeFolder)); return; }
+
+    const editButton = target.closest("[data-edit-rule]");
+    if (editButton) { editRule(Number(editButton.dataset.editRule)); return; }
+
+    const deleteButton = target.closest("[data-delete-rule]");
+    if (deleteButton) {
+      if (deleteButton.dataset.armed === "1" && Date.now() - Number(deleteButton.dataset.armedAt || 0) > 400) {
+        await deleteRule(Number(deleteButton.dataset.deleteRule));
+      } else {
+        deleteButton.dataset.armed = "1";
+        deleteButton.dataset.armedAt = String(Date.now());
+        deleteButton.textContent = "Confirm delete";
+        setTimeout(() => {
+          if (deleteButton.isConnected) { deleteButton.dataset.armed = "0"; deleteButton.textContent = "Delete"; }
+        }, 4000);
+      }
+      return;
+    }
+
+    if (target.closest("[data-action='cancel-rule']")) { $("#rule-form").innerHTML = ""; return; }
+
+    const unpick = target.closest("[data-unpick]");
+    if (unpick) {
+      pickers[unpick.dataset.unpick].splice(Number(unpick.dataset.index), 1);
+      renderPicker(unpick.dataset.unpick);
+      return;
+    }
+
+    const decision = target.closest("[data-decision]");
+    if (decision) { await resolveDecision(decision.dataset.decision, decision.dataset.choice, decision); return; }
+
+    const quarantine = target.closest("[data-quarantine]");
+    if (quarantine) {
+      const action = quarantine.dataset.quarantine;
+      const armedRecently = quarantine.dataset.armed === "1" && Date.now() - Number(quarantine.dataset.armedAt || 0) > 400;
+      if (action === "trash" && !armedRecently) {
+        quarantine.dataset.armed = "1";
+        quarantine.dataset.armedAt = String(Date.now());
+        quarantine.textContent = "Confirm stage";
+        setTimeout(() => {
+          if (quarantine.isConnected) { quarantine.dataset.armed = "0"; quarantine.textContent = "Stage for deletion"; }
+        }, 4000);
+        return;
+      }
+      await quarantineAction(quarantine.dataset.rel, action, quarantine);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
+
+view.addEventListener("submit", async event => {
+  event.preventDefault();
+  try {
+    if (event.target.id === "folder-form") {
+      const path = $("#folder-path").value.trim();
+      if (path) await addFolder(path);
+    } else if (event.target.id === "lens-rule-form") {
+      const submit = event.target.querySelector("[type='submit']");
+      submit.disabled = true;
+      try { await saveRule(Number(event.target.dataset.ruleIndex)); }
+      finally { if (submit.isConnected) submit.disabled = false; }
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
+
+view.addEventListener("change", event => {
+  const picker = event.target.closest("select[data-picker]");
+  if (!picker) return;
+  const id = picker.dataset.picker;
+  if (picker.value === "__custom__") {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.dataset.pickerCustom = id;
+    input.placeholder = "Camera name substring";
+    input.setAttribute("aria-label", "Custom camera name substring");
+    picker.replaceWith(input);
+    input.focus();
+  } else if (picker.value && !pickers[id].includes(picker.value)) {
+    pickers[id].push(picker.value);
     renderPicker(id);
   }
 });
-$("#view").addEventListener("keydown", e => {
-  const inp = e.target.closest("input[data-pickcustom]");
-  if (!inp || e.key !== "Enter") return;
-  e.preventDefault();
-  const v = inp.value.trim();
-  if (v && !pickers[inp.dataset.pickcustom].includes(v)) pickers[inp.dataset.pickcustom].push(v);
-  renderPicker(inp.dataset.pickcustom);
-});
-$("#view").addEventListener("click", e => {
-  const x = e.target.closest("[data-unpick]");
-  if (!x) return;
-  pickers[x.dataset.unpick].splice(Number(x.dataset.i), 1);
-  renderPicker(x.dataset.unpick);
+
+view.addEventListener("keydown", event => {
+  const input = event.target.closest("input[data-picker-custom]");
+  if (!input || event.key !== "Enter") return;
+  event.preventDefault();
+  const value = input.value.trim();
+  if (value && !pickers[input.dataset.pickerCustom].includes(value)) pickers[input.dataset.pickerCustom].push(value);
+  renderPicker(input.dataset.pickerCustom);
 });
 
-async function renderRules() {
-  const [cfg, cams] = await Promise.all([api("/api/config"), api("/api/cameras").catch(() => null)]);
-  config = cfg;
-  if (cams) CAMERAS = cams.cameras;
-  warnInvalid();
-  const rules = config.lens_rules;
-  $("#view").innerHTML = `<h2>Lens registry</h2>
-    <p class="sub">First matching rule wins, keyed on the EXIF <span class="mono">Lens</span> signature.
-    Identity tags only — exposure is never touched.</p>
-    <div class="rows">` + (rules.length ? rules.map((r, i) => `
-      <div class="row">
-        <div class="grow engraving mono">
-          <span>${r.match_lens.map(esc).join(" · ")}</span>
-          ${r.match_lens_id_regex ? `<span class="m">id~${esc(r.match_lens_id_regex)}</span>` : ""}
-          ${r.match_camera ? `<span class="m">@ ${r.match_camera.map(esc).join(", ")}</span>` : ""}
-          ${r.exclude_camera ? `<span class="m" style="color:var(--reject)">not ${r.exclude_camera.map(esc).join(", ")}</span>` : ""}
-          <span class="arrow">→</span>
-          <span>${esc(r.lens_model || (r.set_focal_length ? r.set_focal_length + "mm focal" : ""))}</span>
-          ${r.lens_info ? `<span class="m">[${esc(r.lens_info)}]</span>` : ""}
-        </div>
-        <button class="btn quiet" onclick="editRule(${i})">EDIT</button>
-        <button class="btn quiet" onclick="deleteRule(${i})">DELETE</button>
-      </div>`).join("") : `<div class="empty">No rules — NEFs pass through untouched.</div>`) +
-    `</div>
-    <div style="margin-top:14px;display:flex;gap:8px">
-      <button class="btn" onclick="editRule(-1)">ADD RULE</button>
-    </div>
-    <div id="ruleform"></div>
-    <h2>Test a signature</h2>
-    <p class="sub">Paste a <span class="mono">Lens</span> value (e.g. <span class="mono">50mm f/1.3</span>) and
-    optionally a body name to see which rule fires.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input type="text" id="probe" placeholder="50mm f/1.3" oninput="probeRule()" style="max-width:240px">
-      <input type="text" id="probe-cam" list="cam-list" placeholder="camera (e.g. NIKON Z f)" oninput="probeRule()" style="max-width:240px">
-      <datalist id="cam-list">${CAMERAS.map(c => `<option value="${esc(c.name)}">`).join("")}</datalist>
-    </div>
-    <div class="hint mono" id="proberesult"></div>`;
-}
-function probeRule() {
-  const out = $("#proberesult");
-  const v = $("#probe").value.trim();
-  const cam = $("#probe-cam").value.trim().toLowerCase();
-  if (!v) { out.textContent = ""; return; }
-  const camOk = r =>
-    (!r.match_camera || r.match_camera.some(m => cam.includes(m.toLowerCase()))) &&
-    (!r.exclude_camera || !r.exclude_camera.some(m => cam.includes(m.toLowerCase())));
-  const hit = config.lens_rules.find(r => r.match_lens.includes(v) && camOk(r));
-  const camNote = config.lens_rules.some(r => r.match_lens.includes(v) && !camOk(r))
-    ? "  (a rule exists but this camera is excluded)" : "";
-  out.textContent = hit
-    ? `→ ${hit.lens_model || hit.set_focal_length + "mm"}${hit.match_lens_id_regex ? "  (if LensID ~ " + hit.match_lens_id_regex + ")" : ""}`
-    : `no rule matches — file passes through untouched${camNote}`;
-  out.style.color = hit ? "var(--safelight)" : "var(--faint)";
-}
-function editRule(i) {
-  const r = i >= 0 ? config.lens_rules[i] : {};
-  $("#ruleform").innerHTML = `<div class="field-grid">
-    <label>MATCH LENS (comma-sep)</label><input type="text" id="f-match" value="${esc((r.match_lens||[]).join(", "))}" placeholder="50mm f/1.2, 50mm f/1.3">
-    <label>LENSID REGEX (optional)<div class="hint" style="margin-top:3px">POSIX ERE — \d and (?:…) won't work</div></label><input type="text" id="f-regex" value="${esc(r.match_lens_id_regex||"")}" placeholder="Leica.*35">
-    <label>ONLY THESE CAMERAS<div class="hint" style="margin-top:3px">pick from bodies seen in the library, or add custom — blank = any body</div></label><div class="pickerbox" id="f-cam"></div>
-    <label>NEVER THESE CAMERAS</label><div class="pickerbox" id="f-xcam"></div>
-    <label>SET LENS MODEL</label><input type="text" id="f-model" value="${esc(r.lens_model||"")}" placeholder="FE 50mm F1.2 GM">
-    <label>SET LENS INFO</label><input type="text" id="f-info" value="${esc(r.lens_info||"")}" placeholder="50 50 1.2 1.2">
-    <label>SET FOCAL LENGTH</label><input type="text" id="f-focal" value="${esc(r.set_focal_length||"")}" placeholder="35">
-    <div class="form-foot">
-      <button class="btn quiet" onclick="$('#ruleform').innerHTML=''">CANCEL</button>
-      <button class="btn" onclick="saveRule(${i})">SAVE RULE</button>
-    </div></div>`;
-  pickers["f-cam"] = [...(r.match_camera || [])];
-  pickers["f-xcam"] = [...(r.exclude_camera || [])];
-  renderPicker("f-cam");
-  renderPicker("f-xcam");
-  $("#f-match").focus();
-}
-async function saveRule(i) {
-  const rule = {};
-  const match = $("#f-match").value.split(",").map(s => s.trim()).filter(Boolean);
-  if (match.length) rule.match_lens = match;
-  const rx = $("#f-regex").value.trim(); if (rx) rule.match_lens_id_regex = rx;
-  if ((pickers["f-cam"] || []).length) rule.match_camera = [...pickers["f-cam"]];
-  if ((pickers["f-xcam"] || []).length) rule.exclude_camera = [...pickers["f-xcam"]];
-  const model = $("#f-model").value.trim(); if (model) rule.lens_model = model;
-  const info = $("#f-info").value.trim(); if (info) rule.lens_info = info;
-  const focal = $("#f-focal").value.trim(); if (focal) rule.set_focal_length = focal;
-  const rules = [...config.lens_rules];
-  if (i >= 0) rules[i] = rule; else rules.push(rule);
-  try {
-    config = await api("/api/config", { method: "PUT",
-      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ lens_rules: rules }) });
-    toast("lens registry updated");
-    renderRules();
-  } catch (e) { toast(e.message, true); }
-}
-async function deleteRule(i) {
-  const rules = config.lens_rules.filter((_, n) => n !== i);
-  try {
-    config = await api("/api/config", { method: "PUT",
-      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ lens_rules: rules }) });
-    toast("rule deleted");
-    renderRules();
-  } catch (e) { toast(e.message, true); }
-}
-
-/* ---------- decisions ---------- */
-async function renderDecisions() {
-  const [d, cfg] = await Promise.all([api("/api/decisions"), api("/api/config")]);
-  config = cfg;
-  const presets = cfg.lens_presets || [];
-  $("#view").innerHTML = `<h2>Lens decisions</h2>
-    <p class="sub">Glass the rules didn't recognize. Answer here or on Telegram —
-    unanswered questions auto-close after ${esc(String(cfg.ask_timeout_hours))}h with no changes.</p>
-    <div class="rows">` + (d.pending.length ? d.pending.map(q => `
-      <div class="row" style="align-items:flex-start">
-        <img loading="lazy" src="/api/thumb?v=${THUMB_V}&f=${encodeURIComponent(q.rel)}"
-             style="width:96px;aspect-ratio:3/2;object-fit:cover;border-radius:4px;border:1px solid var(--hairline)"
-             onerror="this.style.display='none'">
-        <div class="grow">
-          <div class="mono name">${esc(q.rel)}</div>
-          <div class="dim">${q.camera ? esc(q.camera) + " · " : ""}Lens: ${esc(q.lens || "—")} · LensID: ${esc(q.lensid || "—")}</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-            ${presets.map((p, i) => `<button class="btn" data-decide="${esc(q.id)}" data-choice="${i}">${esc(p.label)}</button>`).join("")}
-            <button class="btn quiet" data-decide="${esc(q.id)}" data-choice="skip">LEAVE AS-IS</button>
-          </div>
-        </div>
-      </div>`).join("") : `<div class="empty">No open questions — every lens accounted for.</div>`) + `</div>` +
-    (d.resolved.length ? `<h2>Recently answered</h2><div class="rows">` + d.resolved.map(q => `
-      <div class="row"><span class="mono grow name">${esc(q.rel || "?")}</span>
-        <span class="dim">${esc(q.outcome || "")} · ${esc(q.via || "")}</span></div>`).join("") + `</div>` : "");
-}
-$("#view").addEventListener("click", async e => {
-  const btn = e.target.closest("[data-decide]");
-  if (!btn) return;
-  btn.disabled = true;
-  try {
-    const r = await api("/api/decision", { method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ id: btn.dataset.decide, choice: btn.dataset.choice }) });
-    toast(r.outcome);
-    renderDecisions();
-  } catch (err2) { toast(err2.message, true); btn.disabled = false; }
+view.addEventListener("input", event => {
+  if (event.target.matches("#rule-probe, #rule-camera")) probeRule();
 });
 
-/* ---------- folders ---------- */
-async function renderFolders() {
-  const [cfg, lib] = await Promise.all([api("/api/config"), api("/api/library")]);
-  config = cfg;
-  warnInvalid();
-  $("#view").innerHTML = `<h2>Watched folders</h2>
-    <p class="sub">Anything dropped here is swept into <span class="mono">incoming/</span> once it sits still for a minute,
-    then sorted like any upload. Paths live under <span class="mono">/data</span>.</p>
-    <div class="rows">` + (cfg.watched_folders.length ? cfg.watched_folders.map((p, i) => `
-      <div class="row"><span class="mono grow name">${esc(p)}</span>
-        <button class="btn quiet" onclick="removeFolder(${i})">REMOVE</button></div>`).join("")
-      : `<div class="empty">No extra folders — only incoming/ is watched.</div>`) + `</div>
-    <div style="margin-top:14px;display:flex;gap:8px">
-      <input type="text" id="f-folder" placeholder="/data/drop-here" style="max-width:340px">
-      <button class="btn" onclick="addFolder()">WATCH</button>
-    </div>
-    <h2>Library</h2><div class="daylist" id="daylist"><div class="rows">` +
-    (lib.days.length ? lib.days.map(d => `
-      <div class="row" onclick="renderDay('${d.date}')">
-        <span class="mono grow">${d.date}</span>
-        <span class="dim">${Object.entries(d.types).map(([t,n]) => `${t} ${n}`).join(" · ") || "empty"}</span>
-        <span class="mono" style="color:var(--halide)">${d.total}</span></div>`).join("")
-      : `<div class="empty">Library is empty.</div>`) + `</div></div>`;
-}
-async function addFolder() {
-  const p = $("#f-folder").value.trim();
-  if (!p) return;
-  try {
-    config = await api("/api/config", { method: "PUT",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ watched_folders: [...config.watched_folders, p] }) });
-    toast("watching " + p);
-    renderFolders();
-  } catch (e) { toast(e.message, true); }
-}
-async function removeFolder(i) {
-  try {
-    config = await api("/api/config", { method: "PUT",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ watched_folders: config.watched_folders.filter((_, n) => n !== i) }) });
-    toast("folder removed");
-    renderFolders();
-  } catch (e) { toast(e.message, true); }
-}
-async function renderDay(date) {
-  const d = await api("/api/library/" + date);
-  $("#view").innerHTML = `<h2><span class="crumb" onclick="renderFolders()">LIBRARY</span>
-      <span style="color:var(--ghost)"> / </span>${date}</h2>
-    <div class="sheet">` + d.files.map(f => {
-      const canThumb = /\.(nef|arw|raf|dng|nrw|jpe?g|tiff?)$/i.test(f.name);
-      return `<figure class="frame">
-        ${canThumb ? `<img loading="lazy" src="/api/thumb?v=${THUMB_V}&f=${encodeURIComponent(f.rel)}"
-                        onerror="this.outerHTML='<div class=ph>NO PREVIEW</div>'">`
-                   : `<div class="ph">${esc(f.type.toUpperCase())}</div>`}
-        <figcaption><div class="fn">${esc(f.name)}</div>
-          <div class="fm"><span>${bytes(f.size)}</span><span class="badge">${esc(f.type)}</span></div>
-        </figcaption></figure>`;
-    }).join("") + `</div>`;
-}
-
-/* ---------- quarantine ---------- */
-async function renderQuarantine() {
-  const q = await api("/api/quarantine");
-  const active = q.files.filter(f => !f.rel.startsWith("_trash/"));
-  const trash = q.files.length - active.length;
-  $("#view").innerHTML = `<h2>Rejects bin</h2>
-    <p class="sub">RETRY re-runs full validation via <span class="mono">incoming/</span>;
-    TRASH stages to <span class="mono">_trash/</span> (delete it whenever).${trash ? ` <span class="mono">${trash} staged in _trash.</span>` : ""}</p>
-    <div class="rows">` + (active.length ? active.map(f => `
-      <div class="row">
-        <span class="mono grow name">${esc(f.rel)}</span>
-        <span class="dim">${bytes(f.size)}</span>
-        <button class="btn" data-qact="retry" data-rel="${esc(f.rel)}">RETRY</button>
-        <button class="btn danger" data-qact="trash" data-armed="0" data-rel="${esc(f.rel)}">TRASH</button>
-      </div>`).join("") : `<div class="empty">Nothing in quarantine — the bin is clean.</div>`) + `</div>`;
-}
-async function quarAct(rel, action, btn) {
-  btn.disabled = true;
-  try {
-    const r = await api("/api/quarantine/action", { method: "POST",
-      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ rel, action }) });
-    toast(`${action}: → ${r.moved_to}`);
-    renderQuarantine();
-  } catch (e) { toast(e.message, true); btn.disabled = false; }
-}
-// Delegated: rel paths come from filenames — never inline them into JS strings.
-$("#view").addEventListener("click", e => {
-  const btn = e.target.closest("[data-qact]");
-  if (!btn) return;
-  const rel = btn.dataset.rel;
-  if (btn.dataset.qact === "retry") { quarAct(rel, "retry", btn); return; }
-  if (btn.dataset.armed === "1") { quarAct(rel, "trash", btn); return; }
-  btn.dataset.armed = "1"; btn.textContent = "SURE?";
-  setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = "0"; btn.textContent = "TRASH"; } }, 3000);
-});
-
-/* ---------- router ---------- */
-async function render() {
+async function render({ focus = true } = {}) {
   clearInterval(pollTimer);
+  rawRoute = location.hash.slice(1) || "now";
+  tab = normalizeRoute(rawRoute);
+  renderTabs();
+  document.title = `${TABS.find(([id]) => id === tab)[1]} · Camera Dropbox`;
   try {
-    if (tab === "overview") {
-      await renderOverview();
-      pollTimer = setInterval(refreshOverview, 8000);
+    if (tab === "now") await renderNow();
+    else {
+      const page = tab === "library" ? renderLibrary()
+        : tab === "attention" ? renderAttention()
+        : renderAutomations();
+      await Promise.all([page, refreshChrome()]);
     }
-    else if (tab === "switches") await renderSwitches();
-    else if (tab === "rules") await renderRules();
-    else if (tab === "decisions") await renderDecisions();
-    else if (tab === "folders") await renderFolders();
-    else if (tab === "quarantine") await renderQuarantine();
-  } catch (e) {
-    $("#view").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if (focus) requestAnimationFrame(() => view.focus({ preventScroll: true }));
+  } catch (error) {
+    routeError(error);
+    refreshChrome();
   }
+  pollTimer = setInterval(async () => {
+    try {
+      if (tab === "now" && !document.hidden && !view.contains(document.activeElement)) await renderNow({ loading: false });
+      else await refreshChrome();
+    } catch (error) {
+      await refreshChrome();
+      toast(`Status refresh failed: ${error.message}`, true);
+    }
+  }, 8000);
 }
+
+window.addEventListener("hashchange", () => render());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    if (tab === "now") renderNow({ loading: false }).catch(error => toast(error.message, true));
+    else refreshChrome();
+  }
+});
+
 renderTabs();
 render();
 </script>

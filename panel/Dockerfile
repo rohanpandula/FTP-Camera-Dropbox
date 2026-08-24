@@ -4,6 +4,7 @@ FROM python:3.12-alpine
 RUN apk add --no-cache exiftool \
     && pip install --no-cache-dir "fastapi==0.115.*" "uvicorn==0.30.*" "pillow==10.*"
 COPY app.py index.html /app/
+COPY assets /app/assets/
 USER 99:100
 EXPOSE 8484
 CMD ["python", "-m", "uvicorn", "--app-dir", "/app", "app:app", "--host", "0.0.0.0", "--port", "8484"]
