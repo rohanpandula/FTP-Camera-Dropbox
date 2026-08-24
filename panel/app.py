@@ -1025,6 +1025,26 @@ def no_store(payload: dict) -> JSONResponse:
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/assets/big-shoulders.woff2")
+def display_font():
+    path = Path(__file__).parent / "assets" / "big-shoulders.woff2"
+    if not path.is_file():
+        return err("asset missing", 404)
+    return FileResponse(path,
+                        media_type="font/woff2",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@app.get("/assets/archival-paper.webp")
+def archival_paper_texture():
+    path = Path(__file__).parent / "assets" / "archival-paper.webp"
+    if not path.is_file():
+        return err("asset missing", 404)
+    return FileResponse(path,
+                        media_type="image/webp",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @app.get("/")
 def index():
     # no-cache: browsers must revalidate so a redeployed panel shows up on
