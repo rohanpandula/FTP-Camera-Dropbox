@@ -2642,6 +2642,7 @@ fi
 
 echo "PASS: dead inotify watcher exited for container restart"
 
+stop_sorter
 rm -rf "$TEST_ROOT/data"
 mkdir -p "$TEST_ROOT/data/incoming"
 # The .part suffix is load-bearing: process() skips it, so the file stays in
