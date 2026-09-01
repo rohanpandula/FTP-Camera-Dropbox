@@ -41,6 +41,15 @@ if [[ ! "$TOWER_TMP" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
   echo "TOWER_TMP must match ^/[A-Za-z0-9._/-]*\$ (got: $TOWER_TMP)" >&2
   exit 2
 fi
+# The charset check above still admits a bare "/", a trailing slash, and
+# "." / ".." segments; any of those would aim the remote rsync --delete and
+# rm -rf outside the scratch tree, as root. Reject them before anything runs.
+case "$TOWER_TMP" in
+  /|*/) echo "TOWER_TMP must be an absolute directory below / with no trailing slash (got: $TOWER_TMP)" >&2; exit 2 ;;
+esac
+case "$TOWER_TMP/" in
+  */../*|*/./*|*//*) echo "TOWER_TMP must not contain ., .., or empty path segments (got: $TOWER_TMP)" >&2; exit 2 ;;
+esac
 
 # id, dir, and tag are built from a short git hash and this shell's PID --
 # both hex/decimal, so the derived strings are charset-safe by
