@@ -109,6 +109,14 @@ None - no external service configuration required.
 - `panel/.venv` is local-only and gitignored; Phase 4's deploy does not need it (the Dockerfile's runtime deps are unchanged — no new dependency was added).
 - No blockers for Plan 03-03 (mirror logging) or Plan 03-01 (healthcheck abort alert) — this plan touched only `panel/app.py`, `panel/index.html`, `panel/tests/`, and `.gitignore`, disjoint from both.
 
+## Self-Check: PASSED
+
+- FOUND: panel/tests/test_quarantine.py
+- FOUND: .planning/phases/03-observability-and-panel-honesty/03-02-SUMMARY.md
+- FOUND: 8824a0b (tests: ignore local virtualenvs)
+- FOUND: ee32eb4 (panel: derive intake age from ctime and byte-verify prune)
+- FOUND: bf387cc (panel: stop calling a name+size match an identical copy)
+
 ---
 *Phase: 03-observability-and-panel-honesty*
 *Completed: 2026-09-01*
