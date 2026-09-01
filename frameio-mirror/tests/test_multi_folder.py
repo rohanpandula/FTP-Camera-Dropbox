@@ -78,20 +78,30 @@ class MultiFolderRegistryTests(unittest.TestCase):
         self.remember("folder-b")
         self.assertEqual(app._reconcile_folder_ids(), ["legacy-f", "folder-b"])
 
-    def test_registry_rejects_garbage_and_caps(self):
+    def test_registry_rejects_garbage(self):
         app._save_state({
-            "c2c_folder_id": "f-0",
             "c2c_account_id": "acct-1",
-            "c2c_folder_ids": ["f-0", 7, "", "x" * 201]
-            + [f"f-{i}" for i in range(1, 20)],
+            "c2c_folder_ids": ["f-a", 7, "", "x" * 201, "f-b"],
         })
+        self.assertEqual(app._reconcile_folder_ids(), ["f-a", "f-b"])
+
+    def test_full_registry_evicts_oldest_for_newest(self):
+        app._save_state({
+            "c2c_folder_id": "f-1",
+            "c2c_account_id": "acct-1",
+            "c2c_folder_ids": [f"f-{i}" for i in range(1, 17)],  # 16 entries
+        })
+        self.remember("f-new")
         ids = app._reconcile_folder_ids()
-        self.assertEqual(ids[0], "f-0")
-        self.assertNotIn("", ids)
-        self.assertNotIn(7, ids)
-        self.assertLessEqual(len(ids), 16)
-        self.remember("f-new")  # registry full: refused without crashing
-        self.assertNotIn("f-new", app._reconcile_folder_ids())
+        self.assertEqual(len(ids), 16)
+        self.assertNotIn("f-1", ids)      # oldest evicted
+        self.assertEqual(ids[-1], "f-new")  # newest swept
+
+    def test_reseen_folder_is_promoted_to_newest(self):
+        self.remember("folder-a")
+        self.remember("folder-b")
+        self.remember("folder-a")
+        self.assertEqual(app._reconcile_folder_ids(), ["folder-b", "folder-a"])
 
     def test_invalid_parent_folder_ignored(self):
         self.remember(None)
