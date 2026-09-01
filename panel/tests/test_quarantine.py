@@ -105,3 +105,24 @@ def test_status_age_s_is_arrival_time():
     incoming = response.json()["incoming"]
     assert len(incoming) == 1
     assert incoming[0]["age_s"] < 60
+
+
+def test_prune_ignores_symlinked_library_candidate(tmp_path):
+    # Review CR-01: a symlink under sorted/ (SMB clients can plant one) must
+    # never count as an archived copy, even when its target's bytes match.
+    name = "DSC00005.ARW"
+    payload = b"X" * 2048
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(payload)
+    os.symlink(outside, SORTED_RAW / name)
+    quar_file = QUAR_DATED / name
+    quar_file.write_bytes(payload)
+
+    listing = client.get("/api/quarantine").json()["files"]
+    assert listing and not listing[0]["in_library"]
+
+    response = client.post("/api/quarantine/action", json={"action": "prune_verified"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["removed"] == 0
+    assert quar_file.exists()

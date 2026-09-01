@@ -616,6 +616,11 @@ def _library_name_sizes() -> dict:
         if SORTED.is_dir():
             for f in walk_files(SORTED):
                 try:
+                    # /data is SMB-writable: a symlink planted under sorted/
+                    # must never count as an archived copy, or prune would
+                    # delete a held file with no genuine backing (review CR-01).
+                    if f.is_symlink() or not f.is_file():
+                        continue
                     st = f.stat()
                     index.setdefault(f.name, {}).setdefault(st.st_size, []).append(f)
                 except OSError:
@@ -674,6 +679,10 @@ async def api_quarantine_action(request: Request):
                 identical = False
                 for candidate in candidates:
                     try:
+                        # Re-check at compare time: the index is cached for
+                        # 60 s and a candidate could have been swapped since.
+                        if candidate.is_symlink() or not candidate.is_file():
+                            continue
                         if filecmp.cmp(f, candidate, shallow=False):
                             identical = True
                             break
