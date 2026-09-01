@@ -126,3 +126,9 @@ None - no external service configuration required.
 ---
 *Phase: 01-baseline*
 *Completed: 2026-09-01*
+
+## Self-Check: PASSED
+
+- FOUND: `.planning/phases/01-baseline/01-01-SUMMARY.md`
+- FOUND: commit `5b8e2a5` (Task 1 cherry-pick)
+- FOUND: commit `eaf377c` (plan metadata: SUMMARY.md + REQUIREMENTS.md)
