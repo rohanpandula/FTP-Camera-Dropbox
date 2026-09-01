@@ -154,3 +154,11 @@ WARNING  frameio-mirror:app.py:357 Failed to read state file /tmp/tmpum51bojq/st
 ---
 *Phase: 01-baseline*
 *Completed: 2026-09-01*
+
+## Self-Check: PASSED
+
+- FOUND: `.planning/phases/01-baseline/01-02-SUMMARY.md`
+- FOUND: `frameio-mirror/tests/test_multi_folder.py`
+- FOUND: commit `5597444` (Task 1: os.path.realpath at the seven D-04 sites)
+- FOUND: commit `8291b3d` (plan metadata: SUMMARY.md)
+- FOUND: commit `c933483` (plan metadata: REQUIREMENTS.md BASE-02/BASE-03 complete)
