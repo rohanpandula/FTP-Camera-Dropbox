@@ -227,4 +227,28 @@ grep -q '2026-08-23T09:47:00.100000-07:00' "$CURL_LOG"
 [[ $(grep -c '' "$CASE_DIR/state/ftp-aborts.seen") -eq 1 ]]
 echo "PASS: unpaired abort alerts as unknown file"
 
+new_case
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-31T12:00:00.100000-07:00 af0a0c2db5cb pure-ftpd: (cameras@odd]host.localdomain) [NOTICE] /home/ftpusers/cameras//DSC01234.ARW uploaded  (1000000 bytes, 12.50KB/sec)
+2026-08-31T12:00:00.200000-07:00 af0a0c2db5cb pure-ftpd: (cameras@odd]host.localdomain) [DEBUG] 451-Transfer aborted
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+[[ $(wc -l < "$CURL_LOG") -eq 1 ]]
+grep -q 'DSC01234.ARW' "$CURL_LOG"
+grep -q '1.0 MB' "$CURL_LOG"
+echo "PASS: a session key containing ] still pairs the abort with its upload"
+
+new_case
+printf 'sentinel\n' > "$CASE_DIR/link-target"
+ln -s "$CASE_DIR/link-target" "$CASE_DIR/state/ftp-aborts.seen"
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-31T11:00:41.202201-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [NOTICE] /home/ftpusers/cameras//C0090.MP4 uploaded  (60889848 bytes, 65.32KB/sec)
+2026-08-31T11:00:41.213815-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Transfer aborted
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log" 2>/dev/null
+[[ ! -e "$CURL_LOG" ]]
+[[ -L "$CASE_DIR/state/ftp-aborts.seen" ]]
+[[ "$(cat "$CASE_DIR/link-target")" == "sentinel" ]]
+echo "PASS: a symlinked fingerprint file sends nothing and is never written through"
+
 echo "All Unraid healthcheck tests passed."

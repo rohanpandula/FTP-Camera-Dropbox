@@ -255,10 +255,14 @@ else
       while IFS= read -r line; do
         if [[ "$line" =~ $notice_re ]]; then
           path=${BASH_REMATCH[3]}
-          ftp_notice[${BASH_REMATCH[2]}]="${BASH_REMATCH[4]}|${BASH_REMATCH[5]}|${path##*/}"
+          # The session key comes from the client-visible (user@host) field;
+          # restrict it to a safe charset so it can never break the
+          # associative-array subscript (a literal ']' would) — review WR-01.
+          session=${BASH_REMATCH[2]//[^A-Za-z0-9@._:-]/_}
+          ftp_notice[$session]="${BASH_REMATCH[4]}|${BASH_REMATCH[5]}|${path##*/}"
         elif [[ "$line" =~ $abort_re ]]; then
           ts=${BASH_REMATCH[1]}
-          session=${BASH_REMATCH[2]}
+          session=${BASH_REMATCH[2]//[^A-Za-z0-9@._:-]/_}
           pair=${ftp_notice[$session]:-}
           if [ -n "$pair" ]; then
             unset "ftp_notice[$session]"
@@ -274,13 +278,21 @@ else
           fi
           fingerprint=$(printf '%s' "${ts}|${fname}|${bytes}" | sha256sum); fingerprint=${fingerprint%% *}
           seen_file="${STATE%/*}/ftp-aborts.seen"
-          [ -e "$seen_file" ] || (umask 077; : > "$seen_file")
+          [ -e "$seen_file" ] || [ -L "$seen_file" ] || (umask 077; : > "$seen_file")
+          # Same node checks as every sibling state file (review WR-02): a
+          # symlink, special node, hard link, or foreign owner means an
+          # unsafe fingerprint file — send nothing rather than write through it.
+          seen_meta=$(stat -c '%u:%g:%a:%h' -- "$seen_file" 2>/dev/null || true)
+          if [ -L "$seen_file" ] || [ ! -f "$seen_file" ] || [ "$seen_meta" != "0:0:600:1" ]; then
+            printf 'ftpdropbox-healthcheck: unsafe abort fingerprint file: %s\n' "$seen_file" >&2
+            break
+          fi
           if ! grep -Fqx "$fingerprint" "$seen_file" 2>/dev/null && tg "$message"; then
             printf '%s\n' "$fingerprint" >> "$seen_file"
-            seen_tmp=$(mktemp "${seen_file}.tmp.XXXXXX")
-            chmod 0600 -- "$seen_tmp"
-            tail -n 500 "$seen_file" > "$seen_tmp"
-            mv -f -- "$seen_tmp" "$seen_file"
+            if seen_tmp=$(mktemp "${seen_file}.tmp.XXXXXX"); then
+              chmod 0600 -- "$seen_tmp"
+              tail -n 500 "$seen_file" > "$seen_tmp" && mv -f -- "$seen_tmp" "$seen_file" || rm -f -- "$seen_tmp"
+            fi
           fi
         fi
       done <<< "$ftp_log"
