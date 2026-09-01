@@ -164,4 +164,67 @@ run_check
 grep -q 'backup stamp is in the future' "$CASE_DIR/state/health.state"
 echo "PASS: future backup stamp is rejected"
 
+new_case
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-31T11:00:41.202201-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [NOTICE] /home/ftpusers/cameras//C0090.MP4 uploaded  (60889848 bytes, 65.32KB/sec)
+2026-08-31T11:00:41.213809-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Timeout
+2026-08-31T11:00:41.213815-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Transfer aborted
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+[[ -f "$CURL_LOG" ]]
+[[ $(wc -l < "$CURL_LOG") -eq 1 ]]
+grep -q 'C0090.MP4' "$CURL_LOG"
+grep -q '60.9 MB' "$CURL_LOG"
+grep -q '65 KB/s' "$CURL_LOG"
+[[ ! -e "$CASE_DIR/state/health.state" ]]
+[[ -e "$CASE_DIR/state/ftp-aborts.seen" ]]
+echo "PASS: an aborted upload alerts once with file, size and speed"
+
+new_case
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-31T11:00:41.202201-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [NOTICE] /home/ftpusers/cameras//C0090.MP4 uploaded  (60889848 bytes, 65.32KB/sec)
+2026-08-31T11:00:41.213809-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Timeout
+2026-08-31T11:00:41.213815-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Transfer aborted
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+[[ $(wc -l < "$CURL_LOG") -eq 1 ]]
+echo "PASS: a repeated abort in the next window is not re-sent"
+
+new_case
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-31T11:00:41.202201-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [NOTICE] /home/ftpusers/cameras//C0090.MP4 uploaded  (60889848 bytes, 65.32KB/sec)
+2026-08-31T11:00:41.213809-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 226-File successfully transferred
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+[[ ! -e "$CURL_LOG" ]]
+echo "PASS: a completed upload sends no abort alert"
+
+new_case
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-22T18:26:03.100000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [NOTICE] /home/ftpusers/cameras//DSC01932.ARW uploaded  (3317368 bytes, 3.57KB/sec)
+2026-08-22T18:26:03.150000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Timeout
+2026-08-22T18:26:03.160000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Transfer aborted
+2026-08-22T19:19:47.200000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [NOTICE] /home/ftpusers/cameras//DSC01931.ARW uploaded  (43150400 bytes, 45.32KB/sec)
+2026-08-22T19:19:47.250000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Timeout
+2026-08-22T19:19:47.260000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Transfer aborted
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+[[ $(wc -l < "$CURL_LOG") -eq 2 ]]
+[[ $(grep -c 'DSC01932.ARW' "$CURL_LOG") -eq 1 ]]
+[[ $(grep -c 'DSC01931.ARW' "$CURL_LOG") -eq 1 ]]
+echo "PASS: two aborts in one window send two messages"
+
+new_case
+cat > "$CASE_DIR/ftp.log" <<'FTP_LOG'
+2026-08-23T09:47:00.000000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Timeout
+2026-08-23T09:47:00.100000-07:00 af0a0c2db5cb pure-ftpd: (cameras@SonyImagingDevice.localdomain) [DEBUG] 451-Transfer aborted
+FTP_LOG
+run_check FAKE_FTP_LOG_FILE="$CASE_DIR/ftp.log"
+[[ $(wc -l < "$CURL_LOG") -eq 1 ]]
+grep -q 'FTP upload aborted: unknown file' "$CURL_LOG"
+grep -q '2026-08-23T09:47:00.100000-07:00' "$CURL_LOG"
+[[ $(grep -c '' "$CASE_DIR/state/ftp-aborts.seen") -eq 1 ]]
+echo "PASS: unpaired abort alerts as unknown file"
+
 echo "All Unraid healthcheck tests passed."
