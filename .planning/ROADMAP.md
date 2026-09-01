@@ -78,7 +78,7 @@ Plans:
 Plans:
 
 - [ ] 03-01: Abort alert in `contrib/unraid/ftpdropbox-healthcheck.sh` with fingerprint dedup; extend the docker stub and `tests/unraid-healthcheck.sh`
-- [ ] 03-02: Panel ctime age plus byte-verified `in_library`/`prune_verified`; new `panel/tests/` pytest
+- [x] 03-02: Panel ctime age plus byte-verified `in_library`/`prune_verified`; new `panel/tests/` pytest
 - [x] 03-03: Exception type and repr in mirror logging; unit test for the empty-message case
 
 ### Phase 4: Deploy and Verify
@@ -111,5 +111,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 |-------|----------------|--------|-----------|
 | 1. Baseline | 3/3 | Complete    | 2026-09-01 |
 | 2. Sorter Correctness | 1/1 | Complete    | 2026-09-01 |
-| 3. Observability and Panel Honesty | 1/3 | In Progress|  |
+| 3. Observability and Panel Honesty | 2/3 | In Progress|  |
 | 4. Deploy and Verify | 0/2 | Not started | - |
