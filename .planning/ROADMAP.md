@@ -59,7 +59,7 @@ Plans:
 
 Plans:
 
-- [ ] 02-01: Trailing-pad tolerance in `heif_container_validate` and `-cmin` in the STUCK scan, each with a harness case
+- [ ] 02-01-PLAN.md — (wave 1) Trailing-pad tolerance in `heif_container_validate` and `-cmin` in the reconcile STUCK scan, each with its harness case in the same commit; acceptance is `PASS parallel-sort` (50 `PASS:` lines) through `tests/run-on-tower.sh`
 
 ### Phase 3: Observability and Panel Honesty
 
