@@ -341,6 +341,7 @@ camera tree owned by `root:root`, fix it once with
 the Compose `data-init` migration, or change directory ownership only; avoid a
 recursive file-wide `chown`. The sorter needs writable/traversable directories,
 while original media ownership can remain untouched.
+The panel needs only read access to its mounts: its optional `telegram.json` and health-state mounts in `docker-compose.yml` are already read-only (`:ro`), since the panel never writes either.
 
 If you install `contrib/unraid/ftpdropbox-fixperms.sh`, its defaults also target
 `99:100`. A deployment using different Compose `PUID`/`PGID` values must export
@@ -352,6 +353,7 @@ legacy Unraid name (`pure-ftpd`). Frame.io is optional by default; set
 `REQUIRE_FRAMEIO=1` in its cron command only when that mirror must be present.
 The backup and health scripts keep their stamps and alert state in the
 root-only `/var/lib/ftpdropbox-health/` directory.
+The same cron also alerts on an aborted FTP upload: it reads the FTP container's log for a `451-Transfer aborted`, reports the filename, bytes received, KB/s, and the advice to re-send from the card, sending one message per abort, deduplicated through a fingerprint file in that same directory.
 
 **Hostname instead of raw IP:** add an mDNS alias in `/boot/config/go`:
 
