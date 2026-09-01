@@ -13,6 +13,7 @@ validated paths via argv only).
 from __future__ import annotations
 
 import asyncio
+import filecmp
 import hashlib
 import io
 import json
@@ -340,8 +341,12 @@ def api_status():
                 if f.name.startswith("."):
                     continue
                 st = f.stat()
+                # Camera files carry the capture mtime, not the arrival time —
+                # mtime measured how old the photo is, not how long it has sat
+                # in intake, so a freshly dropped RAW could report hours in
+                # intake and trip the stuck lamp. ctime is when the inode landed.
                 incoming.append({"name": f.name, "size": st.st_size,
-                                 "age_s": int(now - st.st_mtime)})
+                                 "age_s": int(now - st.st_ctime)})
             except OSError:
                 continue
             if len(incoming) >= 50:
@@ -598,9 +603,11 @@ _lib_index_cache = {"ts": 0.0, "index": {}}
 
 
 def _library_name_sizes() -> dict:
-    # name -> set of sizes across sorted/, used to recognise a held file whose
-    # identical copy already lives in the library. Cached briefly: the walk is
-    # cheap relative to exiftool work but not free on very large libraries.
+    # name -> {size: [paths]} across sorted/, used to recognise a held file
+    # whose name and size already appear in the library. Paths are retained
+    # (not just sizes) because prune_verified needs candidates to byte-compare
+    # against, not just a size match. Cached briefly: the walk is cheap
+    # relative to exiftool work but not free on very large libraries.
     with _lib_index_lock:
         now = time.time()
         if now - _lib_index_cache["ts"] < 60:
@@ -609,7 +616,8 @@ def _library_name_sizes() -> dict:
         if SORTED.is_dir():
             for f in walk_files(SORTED):
                 try:
-                    index.setdefault(f.name, set()).add(f.stat().st_size)
+                    st = f.stat()
+                    index.setdefault(f.name, {}).setdefault(st.st_size, []).append(f)
                 except OSError:
                     continue
         _lib_index_cache["ts"] = now
@@ -629,7 +637,7 @@ def api_quarantine():
         files.append({"rel": str(f.relative_to(QUAR)), "name": f.name,
                       "date": f.parent.name, "size": st.st_size,
                       "mtime": int(st.st_mtime),
-                      "in_library": st.st_size in index.get(f.name, set())})
+                      "in_library": st.st_size in index.get(f.name, {})})
     files.sort(key=lambda x: x["mtime"], reverse=True)
     return no_store({"files": files[:500]})
 
@@ -646,23 +654,45 @@ async def api_quarantine_action(request: Request):
         return err("unknown action")
 
     if action == "prune_verified":
-        # Bulk cleanup: delete only held files whose name+size exactly matches a
-        # copy already in sorted/. Everything else stays for a human decision.
+        # Bulk cleanup: delete only held files whose bytes match a same-name,
+        # same-size copy already in sorted/. A name+size match alone is not
+        # proof — two different frames from the same body can share both.
+        # Everything that isn't proven identical stays for a human decision.
         index = _library_name_sizes()
-        removed = 0
+        removed = kept = 0
+        # ponytail: each candidate's bytes are read fresh on every prune call,
+        # no cache. Upgrade to a content-hash cache on the library index if
+        # quarantine ever holds hundreds of RAWs at once.
         for f in list(walk_files(QUAR)):
             try:
-                if f.is_symlink() or f.stat().st_size not in index.get(f.name, set()):
+                if f.is_symlink():
                     continue
-                f.unlink()
-                removed += 1
+                st = f.stat()
+                candidates = index.get(f.name, {}).get(st.st_size, [])
+                if not candidates:
+                    continue
+                identical = False
+                for candidate in candidates:
+                    try:
+                        if filecmp.cmp(f, candidate, shallow=False):
+                            identical = True
+                            break
+                    except OSError:
+                        # A read error proves nothing — never delete on it.
+                        continue
+                if identical:
+                    f.unlink()
+                    removed += 1
+                else:
+                    kept += 1
             except OSError:
                 continue
         for child in list(QUAR.iterdir()):
             if child.is_dir() and not child.name.startswith("_") and not any(child.iterdir()):
                 child.rmdir()
-        log.info("quarantine prune_verified: removed %d verified duplicates", removed)
-        return no_store({"ok": True, "removed": removed})
+        log.info("quarantine prune_verified: removed %d verified duplicates, kept %d unverified",
+                  removed, kept)
+        return no_store({"ok": True, "removed": removed, "kept": kept})
 
     try:
         src = safe_child(QUAR, rel)
