@@ -295,6 +295,10 @@ test "$(docker run --rm --entrypoint sha256sum camera-frameio:test /app/app.py |
 docker run --rm --user 99:100 -e PYTHONPATH=/app \
   -v "$PWD/frameio-mirror/tests:/tests:ro" \
   --entrypoint python camera-frameio:test -m unittest discover -s /tests -v
+
+# No local Docker on this Mac? Run any Linux-only harness above on tower
+# instead; it syncs the current working tree, uncommitted changes included.
+tests/run-on-tower.sh <parallel-sort|unraid-healthcheck|unraid-backup|unraid-fixperms>
 ```
 
 ## Optional: Unraid-Specific Notes
