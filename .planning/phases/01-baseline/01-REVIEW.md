@@ -87,3 +87,7 @@ fi
 _Reviewed: 2026-09-01T21:08:23Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+## Resolution
+
+- CR-01 fixed in commit f886b03 (`TOWER_TMP` now rejects bare `/`, trailing slash, and `.`/`..`/empty segments; verified with five hostile values exiting 2 before any network call). IN-01..IN-03 left as documented.
