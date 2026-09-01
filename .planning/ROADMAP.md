@@ -30,9 +30,9 @@ Four phases, each shippable on its own. Phase 1 puts the code that is actually r
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: Cherry-pick 0d566ce onto the milestone branch, resolve `_remember_c2c_folder`/`_reconcile_folder_ids`/`test_multi_folder.py` toward LRU, run the suite
-- [ ] 01-02: Make the Frame.io tests resolve temp dirs with `os.path.realpath`; verify `.impeccable/` is ignored
-- [ ] 01-03: `tests/run-on-tower.sh` helper for the Linux-only harnesses, documented in README § Tests; baseline run of both harnesses
+- [ ] 01-01-PLAN.md — (wave 1) Cherry-pick 0d566ce onto the milestone branch, prove `frameio-mirror/app.py` and `test_multi_folder.py` are byte-identical to that commit, record 57 passed
+- [ ] 01-02-PLAN.md — (wave 2, needs 01-01) Resolve the Frame.io tests' temp dirs with `os.path.realpath` so the suite passes with the default TMPDIR; verify `.impeccable/` is ignored
+- [ ] 01-03-PLAN.md — (wave 1) `tests/run-on-tower.sh` helper for the Linux-only harnesses, documented in README § Tests and TESTING.md; baseline `PASS` from both harnesses (parallel-sort run is human-gated)
 
 ### Phase 2: Sorter Correctness
 **Goal**: The sorter accepts every valid camera HEIF and stops reporting freshly arrived files as stuck.
