@@ -47,6 +47,12 @@ case ${1:-} in
       *) exit 1 ;;
     esac
     ;;
+  logs)
+    if [[ -n ${FAKE_FTP_LOG_FILE:-} && -r ${FAKE_FTP_LOG_FILE:-} ]]; then
+      cat -- "$FAKE_FTP_LOG_FILE"
+    fi
+    exit 0
+    ;;
   *)
     exit 64
     ;;
