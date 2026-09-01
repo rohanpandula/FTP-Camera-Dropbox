@@ -20,10 +20,10 @@ Every file a camera sends either lands intact in `sorted/` or the operator is to
 - ✓ Frame.io mirror with durable publication journal and size-gated upstream delete — PR #2
 - ✓ Frame.io LRU folder registry (running on tower as image `frameio-mirror:folder-lru`, unmerged)
 - ✓ Panel "Archive Accession Ledger" redesign with prune-verified action — PR #14
+- ✓ BASE-01..04 — LRU registry on main's lineage, Frame.io suite green on macOS, `.impeccable/` ignored, `tests/run-on-tower.sh` proven (48/48 in 3m31s) — Validated in Phase 1: Baseline (2026-09-01)
 
 ### Active
 
-- [ ] BASE — LRU registry lands on main's lineage, tests pass on macOS, stale draft never merged
 - [ ] SORT — HEIF trailing-pad tolerance; STUCK scan keyed on ctime
 - [ ] OBS — Telegram alert for aborted FTP uploads; ctime age in the panel; exception type in mirror logs
 - [ ] PANEL — "Prune verified copies" compares bytes, not name+size
@@ -87,4 +87,4 @@ Every file a camera sends either lands intact in `sorted/` or the operator is to
 | Deploy phase is human-gated with exact commands pre-written | Production host; container swaps are not reversible by an agent | — Pending |
 
 ---
-*Last updated: 2026-09-01 after review of the live deployment*
+*Last updated: 2026-09-01 after Phase 1 (Baseline) completed*
