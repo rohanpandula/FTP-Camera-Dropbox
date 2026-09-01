@@ -60,7 +60,7 @@ cleanup() {
 trap cleanup EXIT
 
 rsync -a --delete \
-  --exclude .git --exclude .planning --exclude .impeccable \
+  --exclude .git --exclude .planning --exclude .impeccable --exclude .claude \
   --exclude '__pycache__' --exclude '.pytest_cache' --exclude '.ruff_cache' --exclude '.venv*' \
   ./ "$TOWER:$dir/"
 
