@@ -31,7 +31,7 @@ Env: `TOWER` (default `root@10.0.0.100`), `TOWER_TMP` (default `/tmp`, validated
 `rsync` and `docker` present there.
 
 It rsyncs the current working tree (uncommitted changes included) to a throwaway
-`$TOWER_TMP/gsd-test-<id>/` directory, excluding `.git`, `.planning`, `.impeccable, .claude`,
+`$TOWER_TMP/gsd-test-<id>/` directory, excluding `.git`, `.planning`, `.impeccable`, `.claude`,
 `__pycache__`, `.pytest_cache`, `.ruff_cache`, and `.venv*`; builds a throwaway
 `gsd-test-<id>` image from it; runs the named harness in a `--rm` container; and always
 removes both the directory and the image via an EXIT trap, pass or fail. The exit status
