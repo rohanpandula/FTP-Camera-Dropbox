@@ -14,8 +14,8 @@
 
 ### Sorter
 
-- [ ] **SORT-01**: `heif_container_validate` accepts a file whose final box ends 1 to 7 bytes before EOF once at least one box has parsed (trailing alignment pad), still rejects an mdat that overruns EOF, and still rejects a file whose first bytes cannot form a box header. A new `tests/parallel-sort.sh` case with a padded fixture passes alongside the existing valid and truncated HEIF cases.
-- [ ] **SORT-02**: The reconcile STUCK scan keys on ctime (`find -cmin`), so a file with an hours-old mtime that arrived seconds ago is not logged STUCK. A harness case proves the negative; `wait_stable`'s `STABLE_SKIP_AGE` keeps using mtime.
+- [x] **SORT-01**: `heif_container_validate` accepts a file whose final box ends 1 to 7 bytes before EOF once at least one box has parsed (trailing alignment pad), still rejects an mdat that overruns EOF, and still rejects a file whose first bytes cannot form a box header. A new `tests/parallel-sort.sh` case with a padded fixture passes alongside the existing valid and truncated HEIF cases.
+- [x] **SORT-02**: The reconcile STUCK scan keys on ctime (`find -cmin`), so a file with an hours-old mtime that arrived seconds ago is not logged STUCK. A harness case proves the negative; `wait_stable`'s `STABLE_SKIP_AGE` keeps using mtime.
 
 ### Observability
 
@@ -62,8 +62,8 @@ Deferred to a later milestone. Tracked but not in the current roadmap.
 | BASE-02 | Phase 1 | Complete |
 | BASE-03 | Phase 1 | Complete |
 | BASE-04 | Phase 1 | Complete |
-| SORT-01 | Phase 2 | Pending |
-| SORT-02 | Phase 2 | Pending |
+| SORT-01 | Phase 2 | Complete |
+| SORT-02 | Phase 2 | Complete |
 | OBS-01 | Phase 3 | Pending |
 | OBS-02 | Phase 3 | Pending |
 | OBS-03 | Phase 3 | Pending |
