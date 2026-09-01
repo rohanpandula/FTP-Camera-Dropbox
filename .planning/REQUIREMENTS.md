@@ -70,6 +70,9 @@ Deferred to a later milestone. Tracked but not in the current roadmap.
 | PANEL-01 | Phase 3 | Pending |
 | DEPLOY-01 | Phase 4 | Pending |
 | DEPLOY-02 | Phase 4 | Pending |
+| OBS-04 | v2 (deferred) | Deferred |
+| OBS-05 | v2 (deferred) | Deferred |
+| SORT-03 | v2 (deferred) | Deferred |
 
 **Coverage:**
 

@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-01)
 
 **Core value:** Every file a camera sends either lands intact in sorted/ or the operator is told exactly which file did not.
-**Current focus:** Phase 1 — Baseline
+**Current focus:** Phase 2 — Sorter Correctness (Phase 3 planned in parallel)
 
 ## Current Position
 
-Phase: 02
-Plan: Not started
-Status: Executing Phase 1
-Last activity: 2026-09-01
+Phase: 2 of 4 (Sorter Correctness)
+Plan: 0 of 1 in current phase
+Status: Planning (Phase 2 and Phase 3 plans in progress)
+Last activity: 2026-09-01 — Phase 1 (Baseline) complete, verification passed 8/8
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [████░░░░░░] 37%
 
 ## Performance Metrics
 
