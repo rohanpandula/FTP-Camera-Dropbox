@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Planning artifacts written; Phase 1 not yet planned
-last_updated: "2026-09-01T21:44:29.429Z"
-last_activity: 2026-09-01 -- Phase 3 planning complete
+last_updated: "2026-09-01T21:44:45.394Z"
+last_activity: 2026-09-01 -- Phase 3 execution started
 progress:
   total_phases: 4
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-01)
 
 **Core value:** Every file a camera sends either lands intact in sorted/ or the operator is told exactly which file did not.
-**Current focus:** Phase 2 — Sorter Correctness
+**Current focus:** Phase 3 — Observability and Panel Honesty
 
 ## Current Position
 
-Phase: 2 (Sorter Correctness) — EXECUTING
-Plan: 1 of 1
-Status: Ready to execute
-Last activity: 2026-09-01 -- Phase 3 planning complete
+Phase: 3 (Observability and Panel Honesty) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 3
+Last activity: 2026-09-01 -- Phase 3 execution started
 
 Progress: [████░░░░░░] 37%
 
