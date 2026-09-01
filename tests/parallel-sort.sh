@@ -49,6 +49,23 @@ write_valid_heif() {
   } > "$path"
 }
 
+write_padded_heif() {
+  local path=$1
+  {
+    # Same ftyp (24 B) and meta (12 B) as write_valid_heif, then an mdat with
+    # an EXPLICIT 60,008-byte size (0xea68) instead of the valid fixture's
+    # zero size, which would run the box to EOF and swallow the pad, proving
+    # nothing. Boxes end at 24+12+60,008 = 60,044; three trailing zero bytes
+    # make the file 60,047 B, clearing the validator's 50,000 B floor. This is
+    # the X100VI DSCF8283.HIF shape that was quarantined on 2026-08-28.
+    printf '\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic'
+    printf '\x00\x00\x00\x0cmeta\x00\x00\x00\x00'
+    printf '\x00\x00\xea\x68mdat'
+    dd if=/dev/zero bs=1000 count=60 2>/dev/null
+    printf '\x00\x00\x00'
+  } > "$path"
+}
+
 write_truncated_heif() {
   local path=$1
   {
@@ -847,10 +864,16 @@ write_valid_heif "$TEST_ROOT/data/incoming/valid-camera.heic"
 write_valid_heif "$TEST_ROOT/data/incoming/valid-camera.heif"
 write_truncated_heif "$TEST_ROOT/data/incoming/truncated-camera.heic"
 write_truncated_heif "$TEST_ROOT/data/incoming/truncated-camera.heif"
+# Both extensions: get_type maps heif and hif through different case
+# alternatives onto the same heif type.
+write_padded_heif "$TEST_ROOT/data/incoming/padded-camera.heif"
+write_padded_heif "$TEST_ROOT/data/incoming/padded-camera.hif"
 valid_heic_hash=$(sha256sum "$TEST_ROOT/data/incoming/valid-camera.heic" | cut -d' ' -f1)
 valid_heif_hash=$(sha256sum "$TEST_ROOT/data/incoming/valid-camera.heif" | cut -d' ' -f1)
 truncated_heic_hash=$(sha256sum "$TEST_ROOT/data/incoming/truncated-camera.heic" | cut -d' ' -f1)
 truncated_heif_hash=$(sha256sum "$TEST_ROOT/data/incoming/truncated-camera.heif" | cut -d' ' -f1)
+padded_heif_hash=$(sha256sum "$TEST_ROOT/data/incoming/padded-camera.heif" | cut -d' ' -f1)
+padded_hif_hash=$(sha256sum "$TEST_ROOT/data/incoming/padded-camera.hif" | cut -d' ' -f1)
 touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/"*
 : > "$TEST_ROOT/sorter.log"
 
@@ -868,12 +891,12 @@ TG_CONFIG="$TEST_ROOT/telegram.json" \
   /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
 SORTER_PID=$!
 
-wait_for_count "$TEST_ROOT/data/sorted" 2 30 \
-  || fail "valid HEIC/HEIF fixtures did not sort"
+wait_for_count "$TEST_ROOT/data/sorted" 4 30 \
+  || fail "valid or padded HEIC/HEIF fixtures did not sort"
 wait_for_count "$TEST_ROOT/data/quarantine" 2 30 \
   || fail "truncated HEIC/HEIF fixtures were not quarantined"
-wait_for_lines "$TEST_ROOT/data/.sort-locks/queues/notify-queue.tsv" 2 30 \
-  || fail "valid HEIC/HEIF notification rows were lost"
+wait_for_lines "$TEST_ROOT/data/.sort-locks/queues/notify-queue.tsv" 4 30 \
+  || fail "valid or padded HEIC/HEIF notification rows were lost"
 wait_for_lines "$TEST_ROOT/data/.sort-locks/queues/quarantine-queue.tsv" 2 30 \
   || fail "invalid HEIC/HEIF quarantine rows were lost"
 
@@ -881,6 +904,10 @@ valid_heic_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
   -path '*/heif/valid-camera.heic' -print -quit)
 valid_heif_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
   -path '*/heif/valid-camera.heif' -print -quit)
+padded_heif_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
+  -path '*/heif/padded-camera.heif' -print -quit)
+padded_hif_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
+  -path '*/heif/padded-camera.hif' -print -quit)
 truncated_heic_quar=$(find "$TEST_ROOT/data/quarantine" -type f \
   -name truncated-camera.heic -print -quit)
 truncated_heif_quar=$(find "$TEST_ROOT/data/quarantine" -type f \
@@ -903,6 +930,19 @@ grep -q 'heif box overruns EOF' "$TEST_ROOT/sorter.log" \
   || fail "truncated HEIC/HEIF rejection was not explained"
 
 echo "PASS: HEIC and HEIF used bounded ISO-BMFF validation"
+
+[[ -n "$padded_heif_sorted" && -n "$padded_hif_sorted" ]] \
+  || fail "padded HEIF/HIF did not sort under their heif type"
+[[ $(sha256sum "$padded_heif_sorted" | cut -d' ' -f1) == "$padded_heif_hash" ]] \
+  || fail "padded HEIF payload changed during sorting"
+[[ $(sha256sum "$padded_hif_sorted" | cut -d' ' -f1) == "$padded_hif_hash" ]] \
+  || fail "padded HIF payload changed during sorting"
+# Whole-log assertion is safe: the truncated fixtures trip the different
+# 'heif box overruns EOF' message, and the log was truncated above.
+! grep -q 'validate: heif truncated box header' "$TEST_ROOT/sorter.log" \
+  || fail "padded HEIF tripped the truncated-box-header guard"
+
+echo "PASS: padded HEIF/HIF with trailing alignment bytes sorts"
 
 stop_sorter
 rm -rf "$TEST_ROOT/data"

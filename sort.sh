@@ -867,10 +867,17 @@ heif_container_validate() {
       return 1
     }
     remaining=$((file_size - offset))
-    (( remaining >= 8 )) || {
+    if (( remaining < 8 )); then
+      # Some writers pad the file to 4-byte alignment after the last box:
+      # X100VI DSCF8283.HIF carries three zero bytes past mdat and was
+      # quarantined here on 2026-08-28 although exiftool reads it fine.
+      # A real truncation is still caught below — the cut box's declared
+      # size overruns EOF — so only a walk that already parsed a box may
+      # stop here; first bytes that cannot form a box header still fail.
+      (( box_count > 0 )) && break
       log "validate: heif truncated box header at byte $offset"
       return 1
-    }
+    fi
     size32=$(read_be_u32 "$f" "$offset") || {
       log "validate: heif unreadable box size at byte $offset"
       return 1
