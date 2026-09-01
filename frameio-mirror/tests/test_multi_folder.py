@@ -1,6 +1,7 @@
 """Multi-camera C2C folder registry: every paired device's ingest folder is
 remembered and swept by reconciliation, not just the first one discovered."""
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +13,7 @@ import app
 class MultiFolderRegistryTests(unittest.TestCase):
     def setUp(self):
         self._dir = tempfile.TemporaryDirectory()
-        root = Path(self._dir.name)
+        root = Path(os.path.realpath(self._dir.name))
         incoming = root / "incoming"
         staging = root / "staging"
         incoming.mkdir()

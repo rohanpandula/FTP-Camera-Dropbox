@@ -185,7 +185,7 @@ class FrameioSafetyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.original_cfg = dict(app.CFG)
         self.runtime_paths = tempfile.TemporaryDirectory()
-        runtime_root = Path(self.runtime_paths.name)
+        runtime_root = Path(os.path.realpath(self.runtime_paths.name))
         runtime_incoming = runtime_root / "incoming"
         runtime_staging = runtime_root / "staging"
         runtime_state = runtime_root / "state.json"
@@ -318,7 +318,7 @@ class FrameioSafetyTests(unittest.IsolatedAsyncioTestCase):
 
     def test_atomic_publish_preserves_two_same_name_payloads(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(os.path.realpath(directory))
             directory_fd, _expected_directory = app._open_incoming_dir(root)
             records = []
             for index, payload in enumerate((b"FIRST", b"SECOND"), start=1):
@@ -367,7 +367,7 @@ class FrameioSafetyTests(unittest.IsolatedAsyncioTestCase):
 
     def test_swapped_temp_symlink_is_never_published_or_opened(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(os.path.realpath(directory))
             sentinel = root / "sentinel"
             sentinel.write_bytes(b"KEEP")
             directory_fd, _expected_directory = app._open_incoming_dir(root)
