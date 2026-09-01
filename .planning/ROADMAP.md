@@ -101,7 +101,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — (wave 1, autonomous) `contrib/unraid/DEPLOY.md` runbook (build, both swaps, healthcheck install, the two live proofs, soak, optional cleanup, D-14 rollback, D-12 frameio recreate) plus README's abort-alert and read-only-mount notes; commit `docs: deploy runbook and abort-alert notes`
+- [x] 04-01-PLAN.md — (wave 1, autonomous) `contrib/unraid/DEPLOY.md` runbook (build, both swaps, healthcheck install, the two live proofs, soak, optional cleanup, D-14 rollback, D-12 frameio recreate) plus README's abort-alert and read-only-mount notes; commit `docs: deploy runbook and abort-alert notes`
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -117,4 +117,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 | 1. Baseline | 3/3 | Complete    | 2026-09-01 |
 | 2. Sorter Correctness | 1/1 | Complete    | 2026-09-01 |
 | 3. Observability and Panel Honesty | 3/3 | Complete    | 2026-09-01 |
-| 4. Deploy and Verify | 0/2 | Not started | - |
+| 4. Deploy and Verify | 1/2 | In Progress|  |
