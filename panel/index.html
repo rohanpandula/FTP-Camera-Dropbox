@@ -1278,7 +1278,7 @@ async function renderNow({ loading = true } = {}) {
         <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Waiting / checking</span><span class="stage-value">${status.incoming.length} ${plural(status.incoming.length, "file")}</span><span class="stage-detail">Settling or being validated</span></div>
         <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Filed by date</span><span class="stage-value">${status.counts.sorted_today} dated today</span><span class="stage-detail">Capture date, not arrival time</span></div>
       </div>
-      ${inbound ? `<div class="register-list" aria-label="Files currently in intake">${status.incoming.map(file => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(file.name)}</div><div class="row-detail">Waiting or checking · ${age(file.age_s)} in intake</div></div><span class="row-value">${bytes(file.size)}</span></div>`).join("")}</div>` : ""}
+      ${inbound ? `<div class="register-list" aria-label="Files currently in intake">${status.incoming.map(file => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(file.name)}</div><div class="row-detail">Waiting or checking · arrived ${age(file.age_s)} ago</div></div><span class="row-value">${bytes(file.size)}</span></div>`).join("")}</div>` : ""}
     </section>
     <section class="now-grid">
       ${attentionRegister(status, quarantine.files)}
@@ -1332,7 +1332,7 @@ async function renderDay(date) {
 function quarantineRows(files) {
   if (!files.length) return '<p class="section-copy">No active quarantine files. Nothing is waiting for a retry or deletion decision.</p>';
   return `<div class="register-list">${files.map(file => `<div class="issue-row">
-    <div class="row-main"><div class="row-title">${esc(file.rel)}${file.in_library ? '<span class="dup-flag">Copy in library</span>' : ""}</div><div class="row-detail">${bytes(file.size)} · held ${age(Math.max(0, Math.round(Date.now() / 1000 - file.mtime)))} ago · ${file.in_library ? "an identical copy is already filed" : "no copy found in the library"}</div></div>
+    <div class="row-main"><div class="row-title">${esc(file.rel)}${file.in_library ? '<span class="dup-flag">Same name+size filed</span>' : ""}</div><div class="row-detail">${bytes(file.size)} · held ${age(Math.max(0, Math.round(Date.now() / 1000 - file.mtime)))} ago · ${file.in_library ? "a same-size copy is filed; prune compares bytes before deleting" : "no copy found in the library"}</div></div>
     <div class="row-actions">
       <button class="button secondary" type="button" data-quarantine="retry" data-rel="${esc(file.rel)}">Retry validation</button>
       <button class="button danger" type="button" data-quarantine="trash" data-rel="${esc(file.rel)}" data-armed="0">Stage for deletion</button>
@@ -1343,7 +1343,7 @@ function quarantineRows(files) {
 function pruneBar(files) {
   const verified = files.filter(file => file.in_library).length;
   if (!verified) return "";
-  return `<div class="prune-bar"><span>${verified} ${plural(verified, "file")} ${verified === 1 ? "has" : "have"} an identical copy already filed in the library.</span>
+  return `<div class="prune-bar"><span>${verified} ${plural(verified, "file")} ${verified === 1 ? "has" : "have"} a same-name, same-size copy filed in the library.</span>
     <button class="button danger" type="button" data-quarantine="prune_verified" data-rel="" data-armed="0">Prune verified copies</button></div>`;
 }
 
@@ -1638,7 +1638,7 @@ async function quarantineAction(relativePath, action, button) {
       body: JSON.stringify({ rel: relativePath, action }),
     });
     toast(action === "retry" ? `Sent back through intake → ${result.moved_to}`
-      : action === "prune_verified" ? `Pruned ${result.removed} verified duplicate${result.removed === 1 ? "" : "s"} from quarantine`
+      : action === "prune_verified" ? `Pruned ${result.removed} verified ${result.removed === 1 ? "copy" : "copies"}${result.kept ? `; kept ${result.kept} whose bytes differed` : ""}`
       : `Staged for manual deletion → ${result.moved_to}`);
     await renderAttention();
   } catch (error) {
