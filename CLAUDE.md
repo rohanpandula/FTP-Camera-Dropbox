@@ -11,7 +11,7 @@ A self-hosted camera intake pipeline: cameras push over Wi-Fi FTP (and Frame.io 
 ### Constraints
 
 - **Tech stack**: Bash 5 (`sort.sh`, `contrib/unraid/*.sh`), Python 3.12 FastAPI (`panel/`, `frameio-mirror/`). No new dependencies; stdlib first.
-- **Safety**: Agents never stop, remove, rename, or recreate production containers on tower, never edit `/boot/config/`, never read secrets (`frameio.json`, `telegram.json`, `state.json`). Deployment is a human-gated phase run with `--interactive`.
+- **Safety**: Agents never stop, remove, rename, or recreate production containers on tower, never edit `/boot/config/plugins/` (the healthcheck under `/boot/config/scripts/` is installed only through Phase 4's human-gated step), never read secrets (`frameio.json`, `telegram.json`, `state.json`). Deployment is a human-gated phase run with `--interactive`.
 - **Compatibility**: `sort.sh` keeps passing all existing harness cases; frameio keeps 57 passing; healthcheck fixture suite keeps passing. Validators stay strict except the one specified tolerance.
 - **Style**: shortest diff that fixes the root cause; comments explain why; no new abstractions; mark deliberate ceilings with `# ponytail:`.
 - **Data**: the library on tower is the user's live working set (Lightroom sidecars beside RAWs). Never move or delete anything under `sorted/`.

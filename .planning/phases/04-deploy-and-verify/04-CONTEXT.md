@@ -23,7 +23,7 @@ Write the deploy runbook and docs (Plan 04-01, autonomous), then execute the run
 ### Plan 04-02 — Execute on tower with checkpoints (DEPLOY-01)
 Run in `--interactive` mode. Each numbered step that mutates tower is its own `checkpoint:human-verify` with the exact command shown; read-only verification steps are `type="auto"`.
 
-- **D-04 (build, auto):** From the merged milestone commit: `rsync -a --delete --exclude .git --exclude .planning --exclude .impeccable ./ root@10.0.0.100:/tmp/sorter-build/` then on tower `docker build -t camera-sorter:$TAG-hardening -t camera-sorter:latest /tmp/sorter-build` and `docker build -t dropbox-panel:$TAG -t dropbox-panel:latest /tmp/sorter-build/panel`. Building does not touch running containers.
+- **D-04 (build, auto):** From the merged milestone commit: `rsync -a --delete --exclude .git --exclude .planning --exclude .impeccable ./ root@10.0.0.100:/tmp/sorter-build/` then on tower `docker build -t camera-sorter:$TAG-hardening -t camera-sorter:latest /tmp/sorter-build` and `docker build -t dropbox-panel:$TAG -t dropbox-panel:latest /tmp/sorter-build/panel`. Building does not touch running containers. The exclude list is a floor, not an exact string: use the vetted set from `tests/run-on-tower.sh` (adds `.claude`, `__pycache__`, `.pytest_cache`, `.ruff_cache`, `.venv*`).
 - **D-05 (swap sorter, checkpoint):** 
   ```
   docker rename camera-sorter camera-sorter-pre-hardening-$TAG && docker stop camera-sorter-pre-hardening-$TAG && docker update --restart=no camera-sorter-pre-hardening-$TAG
