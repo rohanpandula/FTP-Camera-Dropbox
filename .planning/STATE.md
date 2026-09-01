@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Planning artifacts written; Phase 1 not yet planned
-last_updated: "2026-09-01T21:49:41.685Z"
+last_updated: "2026-09-01T22:05:37.090Z"
 last_activity: 2026-09-01
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 4
-  percent: 50
+  completed_phases: 3
+  total_plans: 9
+  completed_plans: 7
+  percent: 75
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-01)
 
 **Core value:** Every file a camera sends either lands intact in sorted/ or the operator is told exactly which file did not.
-**Current focus:** Phase 3 — Observability and Panel Honesty
+**Current focus:** Phase 4 — Deploy and Verify (human-gated)
 
 ## Current Position
 
-Phase: 3 of 4 (Observability and Panel Honesty)
-Plan: 0 of 3 in current phase
-Status: Executing Phase 3 (three worktree executors); Phase 4 planning in progress
-Last activity: 2026-09-01 — Phase 2 (Sorter Correctness) complete, verification passed 5/5
+Phase: 4 of 4 (Deploy and Verify)
+Plan: 0 of 2 in current phase
+Status: Phase 4 planned (checker running); 04-02 requires the operator (`--interactive`)
+Last activity: 2026-09-01 — Phase 3 complete, verification passed 15/15
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4
+- Total plans completed: 7
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -46,6 +46,7 @@ Progress: [█████░░░░░] 50%
 |-------|-------|-------|----------|
 | 1 | 3 | - | - |
 | 2 | 1 | - | - |
+| 3 | 3 | - | - |
 
 **Recent Trend:**
 
