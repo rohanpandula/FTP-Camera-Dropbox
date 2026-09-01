@@ -21,7 +21,7 @@
 
 - [ ] **OBS-01**: `contrib/unraid/ftpdropbox-healthcheck.sh` sends one Telegram alert per aborted FTP upload (filename, bytes received, KB/s, and the advice to re-send from the card) by reading the FTP container's log for `451-Transfer aborted` and the preceding `uploaded (N bytes, X KB/sec)` NOTICE line, deduplicated through a fingerprint file under the root 0700 state dir. `tests/unraid-healthcheck.sh` gains cases (docker stub `logs` subcommand) that pass.
 - [ ] **OBS-02**: Panel `/api/status` derives `incoming[].age_s` and the derived health lamp from `st_ctime`; any UI copy that names the age says "arrived".
-- [ ] **OBS-03**: `frameio-mirror` logs the exception type and `repr` for reconcile-listing and Telegram-send failures; a unit test asserts the log record for an exception whose `str()` is empty names the type.
+- [x] **OBS-03**: `frameio-mirror` logs the exception type and `repr` for reconcile-listing and Telegram-send failures; a unit test asserts the log record for an exception whose `str()` is empty names the type.
 
 ### Panel
 
@@ -66,7 +66,7 @@ Deferred to a later milestone. Tracked but not in the current roadmap.
 | SORT-02 | Phase 2 | Complete |
 | OBS-01 | Phase 3 | Pending |
 | OBS-02 | Phase 3 | Pending |
-| OBS-03 | Phase 3 | Pending |
+| OBS-03 | Phase 3 | Complete |
 | PANEL-01 | Phase 3 | Pending |
 | DEPLOY-01 | Phase 4 | Pending |
 | DEPLOY-02 | Phase 4 | Pending |

@@ -531,7 +531,7 @@ async def _tg_send(text: str) -> bool:
                 return True
             log.warning("Telegram send failed: HTTP %d %s", resp.status_code, resp.text[:200])
         except Exception as exc:
-            log.warning("Telegram send exception: %s", exc)
+            log.warning("Telegram send exception: %s: %r", type(exc).__name__, exc)
     return False
 
 
@@ -1382,7 +1382,9 @@ async def reconcile_once() -> int:
 
     except Exception as exc:
         listing_complete = False
-        log.error("Reconcile listing failed: %s", exc)
+        # httpx timeout exceptions stringify to an empty message, which produced
+        # "Reconcile listing failed: " with nothing after the colon on 2026-08-23.
+        log.error("Reconcile listing failed: %s: %r", type(exc).__name__, exc)
         await notify_failure(
             "reconcile_list_failed",
             f"Frame.io folder listing raised {type(exc).__name__}; durable jobs will still retry.",
