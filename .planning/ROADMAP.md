@@ -11,7 +11,7 @@ Four phases, each shippable on its own. Phase 1 puts the code that is actually r
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Baseline** - LRU registry on main's lineage, macOS-clean tests, tidy checkout
+- [x] **Phase 1: Baseline** - LRU registry on main's lineage, macOS-clean tests, tidy checkout (completed 2026-09-01)
 - [ ] **Phase 2: Sorter Correctness** - HEIF trailing-pad tolerance and ctime-based STUCK scan
 - [ ] **Phase 3: Observability and Panel Honesty** - abort alerts, ctime age, exception types, byte-verified prune
 - [ ] **Phase 4: Deploy and Verify** - human-gated rollout to tower with end-to-end proof
@@ -37,7 +37,7 @@ Plans:
 **Wave 1**
 
 - [x] 01-01-PLAN.md — (wave 1) Cherry-pick 0d566ce onto the milestone branch, prove `frameio-mirror/app.py` and `test_multi_folder.py` are byte-identical to that commit, record 57 passed
-- [ ] 01-03-PLAN.md — (wave 1) `tests/run-on-tower.sh` helper for the Linux-only harnesses, documented in README § Tests and TESTING.md; baseline `PASS` from both harnesses (parallel-sort run is human-gated)
+- [x] 01-03-PLAN.md — (wave 1) `tests/run-on-tower.sh` helper for the Linux-only harnesses, documented in README § Tests and TESTING.md; baseline `PASS` from both harnesses (parallel-sort run is human-gated)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Baseline | 2/3 | In Progress|  |
+| 1. Baseline | 3/3 | Complete   | 2026-09-01 |
 | 2. Sorter Correctness | 0/1 | Not started | - |
 | 3. Observability and Panel Honesty | 0/3 | Not started | - |
 | 4. Deploy and Verify | 0/2 | Not started | - |
