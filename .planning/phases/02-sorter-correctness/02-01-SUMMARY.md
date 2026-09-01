@@ -189,3 +189,15 @@ None. No new network endpoint, auth path, file-access pattern, or schema change 
 ---
 *Phase: 02-sorter-correctness*
 *Completed: 2026-09-01*
+
+## Self-Check: PASSED
+
+- FOUND: `sort.sh`
+- FOUND: `tests/parallel-sort.sh`
+- FOUND: `.planning/phases/02-sorter-correctness/02-01-SUMMARY.md`
+- FOUND: commit `b7e5e48` (Task 1 — HEIF trailing-pad tolerance + harness case)
+- FOUND: commit `74a4cb8` (Task 2 — ctime STUCK scan + harness case)
+- FOUND: commit `199e500` (plan metadata: SUMMARY.md + REQUIREMENTS.md)
+- CONFIRMED: `git diff --name-only HEAD~3..HEAD` lists only `sort.sh`, `tests/parallel-sort.sh`, `.planning/REQUIREMENTS.md`, and this SUMMARY — no other file changed
+- CONFIRMED: `.planning/STATE.md` and `.planning/ROADMAP.md` untouched by this plan's commits (orchestrator owns those writes after merge)
+- CONFIRMED: working tree clean after the metadata commit
