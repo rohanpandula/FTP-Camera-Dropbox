@@ -164,3 +164,7 @@ If `mktemp` fails (e.g. ENOSPC), `seen_tmp` is empty and the subsequent `chmod`/
 _Reviewed: 2026-09-01_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+## Resolution
+
+- CR-01 fixed in commit a3edf31 (index and compare reject symlinks/non-regular files; new panel test). WR-01 and WR-02 fixed in commit d32ed91 (session key sanitized; fingerprint file must be 0:0:600:1 regular; mktemp checked) with two new harness cases; `tests/run-on-tower.sh unraid-healthcheck` → 25 PASS lines. IN-01/IN-02: IN-02 addressed in the same commit; IN-01 (harness case for a failed `docker logs`) left as documented.
