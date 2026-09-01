@@ -8,8 +8,8 @@
 ### Baseline
 
 - [x] **BASE-01**: The milestone branch carries the LRU folder registry from commit 0d566ce (`_remember_c2c_folder` evicts the oldest and promotes a re-seen folder; `_reconcile_folder_ids` returns newest-last, max 16) on top of origin/main, with `frameio-mirror/tests/test_multi_folder.py` asserting LRU behavior and the full Frame.io suite passing (57 tests).
-- [ ] **BASE-02**: The Frame.io test suite passes on macOS with the default `TMPDIR` (tests resolve temporary directories with `os.path.realpath` before handing them to the app).
-- [ ] **BASE-03**: `.impeccable/` is gitignored; the stale panel draft from this checkout is stashed, not committed; `git status` on the milestone branch is clean apart from planning docs.
+- [x] **BASE-02**: The Frame.io test suite passes on macOS with the default `TMPDIR` (tests resolve temporary directories with `os.path.realpath` before handing them to the app).
+- [x] **BASE-03**: `.impeccable/` is gitignored; the stale panel draft from this checkout is stashed, not committed; `git status` on the milestone branch is clean apart from planning docs.
 - [ ] **BASE-04**: `tests/run-on-tower.sh <harness>` syncs the working tree to tower under `/tmp/gsd-test-<id>/`, builds `camera-sorter:gsd-test-<id>`, runs the named Linux-only harness in a `--rm` container, prints `PASS`/`FAIL`, and always removes the build dir and image; it never names a production container or a `/mnt` path. Both `unraid-healthcheck` and `parallel-sort` pass through it.
 
 ### Sorter
@@ -59,8 +59,8 @@ Deferred to a later milestone. Tracked but not in the current roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | BASE-01 | Phase 1 | Complete |
-| BASE-02 | Phase 1 | Pending |
-| BASE-03 | Phase 1 | Pending |
+| BASE-02 | Phase 1 | Complete |
+| BASE-03 | Phase 1 | Complete |
 | BASE-04 | Phase 1 | Pending |
 | SORT-01 | Phase 2 | Pending |
 | SORT-02 | Phase 2 | Pending |
