@@ -137,3 +137,14 @@ No `skip`/`error`/`warn`/`retry`/`timeout` markers anywhere in the log.
 ---
 *Phase: 01-baseline*
 *Completed: 2026-09-01*
+
+## Self-Check: PASSED
+
+- FOUND: `tests/run-on-tower.sh`
+- FOUND: `.planning/phases/01-baseline/01-03-SUMMARY.md`
+- FOUND: commit `a635e3a` (Task 1 — write helper, merged by `cea4019`)
+- FOUND: commit `02ba800` (deviation — exclude `.claude/` from sync)
+- FOUND: commit `51998dd` (plan metadata: SUMMARY.md + REQUIREMENTS.md)
+- FOUND: `--exclude .claude` present in `tests/run-on-tower.sh`'s rsync exclude list
+- FOUND: `BASE-04` checked off and marked Complete in `.planning/REQUIREMENTS.md`'s traceability table
+- CONFIRMED: `.planning/STATE.md` and `.planning/ROADMAP.md` untouched by this plan's commits
