@@ -110,6 +110,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Baseline | 3/3 | Complete    | 2026-09-01 |
-| 2. Sorter Correctness | 1/1 | Complete   | 2026-09-01 |
+| 2. Sorter Correctness | 1/1 | Complete    | 2026-09-01 |
 | 3. Observability and Panel Honesty | 0/3 | Not started | - |
 | 4. Deploy and Verify | 0/2 | Not started | - |
