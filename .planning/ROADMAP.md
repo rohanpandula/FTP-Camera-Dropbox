@@ -99,8 +99,13 @@ Plans:
 
 Plans:
 
-- [ ] 04-01: Docs (README, healthcheck header, panel docker run) and the tower deploy runbook with exact commands
-- [ ] 04-02: Execute the runbook on tower with checkpoints: build, swap sorter, swap panel, install healthcheck, retry HIF, prove the abort alert, optional debris cleanup
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — (wave 1, autonomous) `contrib/unraid/DEPLOY.md` runbook (build, both swaps, healthcheck install, the two live proofs, soak, optional cleanup, D-14 rollback, D-12 frameio recreate) plus README's abort-alert and read-only-mount notes; commit `docs: deploy runbook and abort-alert notes`
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 04-02-PLAN.md — (wave 2, needs 04-01, `autonomous: false`) execute the runbook on tower: build (auto), swap sorter / swap panel / install healthcheck (checkpoints), retry DSCF8283.HIF, fire the abort probe, confirm the Telegram alert (checkpoint), 10-min soak, optional debris cleanup (checkpoint, declinable)
 
 ## Progress
 
