@@ -36,12 +36,12 @@ Four phases, each shippable on its own. Phase 1 puts the code that is actually r
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — (wave 1) Cherry-pick 0d566ce onto the milestone branch, prove `frameio-mirror/app.py` and `test_multi_folder.py` are byte-identical to that commit, record 57 passed
+- [x] 01-01-PLAN.md — (wave 1) Cherry-pick 0d566ce onto the milestone branch, prove `frameio-mirror/app.py` and `test_multi_folder.py` are byte-identical to that commit, record 57 passed
 - [ ] 01-03-PLAN.md — (wave 1) `tests/run-on-tower.sh` helper for the Linux-only harnesses, documented in README § Tests and TESTING.md; baseline `PASS` from both harnesses (parallel-sort run is human-gated)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — (wave 2, needs 01-01) Resolve the Frame.io tests' temp dirs with `os.path.realpath` so the suite passes with the default TMPDIR; verify `.impeccable/` is ignored
+- [x] 01-02-PLAN.md — (wave 2, needs 01-01) Resolve the Frame.io tests' temp dirs with `os.path.realpath` so the suite passes with the default TMPDIR; verify `.impeccable/` is ignored
 
 ### Phase 2: Sorter Correctness
 
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Baseline | 0/3 | Not started | - |
+| 1. Baseline | 2/3 | In Progress|  |
 | 2. Sorter Correctness | 0/1 | Not started | - |
 | 3. Observability and Panel Honesty | 0/3 | Not started | - |
 | 4. Deploy and Verify | 0/2 | Not started | - |
