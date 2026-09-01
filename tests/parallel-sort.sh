@@ -2641,3 +2641,41 @@ if grep -q 'inotifywait exited before watcher readiness' "$TEST_ROOT/sorter.log"
 fi
 
 echo "PASS: dead inotify watcher exited for container restart"
+
+rm -rf "$TEST_ROOT/data"
+mkdir -p "$TEST_ROOT/data/incoming"
+# The .part suffix is load-bearing: process() skips it, so the file stays in
+# incoming for the stuck scan to see and emits no competing log lines.
+printf 'arrived seconds ago, shot three hours ago\n' \
+  > "$TEST_ROOT/data/incoming/late-drop.part"
+# ctime cannot be set backwards, so old-mtime/fresh-ctime is the only pairing
+# the harness can build — and it is exactly what an SMB drag produces. Before
+# the stuck scan moved to -cmin this case failed, which is the point.
+touch -d "@$(( $(date +%s) - 10800 ))" "$TEST_ROOT/data/incoming/late-drop.part"
+: > "$TEST_ROOT/sorter.log"
+
+PATH="$ROOT/tests/fixtures/fast-metadata:$PATH" \
+INCOMING="$TEST_ROOT/data/incoming" \
+SORTED="$TEST_ROOT/data/sorted" \
+QUARANTINE="$TEST_ROOT/data/quarantine" \
+STABLE_WAIT=1 \
+STABLE_SKIP_AGE=1 \
+SORT_WORKERS=1 \
+RECONCILE_IDLE=1 \
+STUCK_AGE_MIN=60 \
+NOTIFY_INTERVAL=3600 \
+RAW_FULL_VALIDATE=0 \
+TG_CONFIG="$TEST_ROOT/telegram.json" \
+  /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
+SORTER_PID=$!
+
+wait_for_log_count 'reconcile scan' 3 20 \
+  || fail "ctime stuck-scan case did not exercise repeated reconciliation"
+assert_log_absent_for 'STUCK >' 3 \
+  || fail "fresh arrival with an old mtime was reported stuck"
+[[ -f "$TEST_ROOT/data/incoming/late-drop.part" ]] \
+  || fail "the late-drop.part fixture left incoming"
+
+echo "PASS: fresh arrival with an old mtime is not reported stuck"
+
+stop_sorter

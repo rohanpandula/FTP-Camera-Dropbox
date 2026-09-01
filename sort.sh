@@ -2082,7 +2082,13 @@ reconcile() {
   prune_stale_ftp_tmp
   prune_stale_dupes
   prune_nef_queue
-  find "$INCOMING" -type f -mmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
+  # ctime, not mtime: SMB drags preserve the camera's capture-time mtime, so
+  # mtime says when the shot was taken, not when the file arrived; ctime is set
+  # by the create/write/rename that landed it. On 2026-08-29 04:23:06 the scan
+  # flagged R0000028-2.JPG..R0000031-2.JPG as stuck past the 60-minute
+  # threshold; they had been dragged in seconds earlier with Aug 28 mtimes,
+  # and all four logged ok: one second later.
+  find "$INCOMING" -type f -cmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
     log "STUCK >${STUCK_AGE_MIN}min: $(log_name "$f")"
   done
   NEXT_RECONCILE_AT=$((SECONDS + RECONCILE_IDLE))
