@@ -12,7 +12,7 @@ Four phases, each shippable on its own. Phase 1 puts the code that is actually r
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: Baseline** - LRU registry on main's lineage, macOS-clean tests, tidy checkout (completed 2026-09-01)
-- [ ] **Phase 2: Sorter Correctness** - HEIF trailing-pad tolerance and ctime-based STUCK scan
+- [x] **Phase 2: Sorter Correctness** - HEIF trailing-pad tolerance and ctime-based STUCK scan (completed 2026-09-01)
 - [ ] **Phase 3: Observability and Panel Honesty** - abort alerts, ctime age, exception types, byte-verified prune
 - [ ] **Phase 4: Deploy and Verify** - human-gated rollout to tower with end-to-end proof
 
@@ -59,7 +59,7 @@ Plans:
 
 Plans:
 
-- [ ] 02-01-PLAN.md — (wave 1) Trailing-pad tolerance in `heif_container_validate` and `-cmin` in the reconcile STUCK scan, each with its harness case in the same commit; acceptance is `PASS parallel-sort` (50 `PASS:` lines) through `tests/run-on-tower.sh`
+- [x] 02-01-PLAN.md — (wave 1) Trailing-pad tolerance in `heif_container_validate` and `-cmin` in the reconcile STUCK scan, each with its harness case in the same commit; acceptance is `PASS parallel-sort` (50 `PASS:` lines) through `tests/run-on-tower.sh`
 
 ### Phase 3: Observability and Panel Honesty
 
@@ -110,6 +110,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Baseline | 3/3 | Complete    | 2026-09-01 |
-| 2. Sorter Correctness | 0/1 | Not started | - |
+| 2. Sorter Correctness | 1/1 | Complete   | 2026-09-01 |
 | 3. Observability and Panel Honesty | 0/3 | Not started | - |
 | 4. Deploy and Verify | 0/2 | Not started | - |
