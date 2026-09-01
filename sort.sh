@@ -874,6 +874,8 @@ heif_container_validate() {
       # A real truncation is still caught below — the cut box's declared
       # size overruns EOF — so only a walk that already parsed a box may
       # stop here; first bytes that cannot form a box header still fail.
+      # (With the 50000-byte size floor above, box_count == 0 cannot reach
+      # this branch; it stays as the fallback should that floor ever change.)
       (( box_count > 0 )) && break
       log "validate: heif truncated box header at byte $offset"
       return 1
