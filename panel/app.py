@@ -176,6 +176,9 @@ def load_config() -> dict:
     # persists them.
     for k, v in DEFAULT_CONFIG.items():
         cfg.setdefault(k, json.loads(json.dumps(v)))
+    # Switches added after the file was written (profile_sidecar) must surface
+    # too: the sorter treats a missing switch as on, so the UI must say so.
+    cfg["features"] = {**DEFAULT_CONFIG["features"], **cfg["features"]}
     return cfg
 
 

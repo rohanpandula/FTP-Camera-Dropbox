@@ -37,3 +37,13 @@ def test_profile_name_cannot_carry_markup():
 def test_defaults_name_cobalt_for_the_two_bodies():
     cameras = {r["camera"]: r["profile"] for r in app.DEFAULT_CONFIG["profile_sidecars"]}
     assert cameras == {"ILCE-7CR": "Cobalt Standard (S)", "GFX100 II": "Cobalt Standard (S)"}
+
+
+def test_older_config_file_surfaces_new_switch_as_on():
+    app.PANEL_DIR.mkdir(parents=True, exist_ok=True)
+    older = {"features": {"lens_massage": True}, "lens_rules": [], "watched_folders": [],
+             "ask_timeout_hours": 12, "lens_presets": []}
+    app.save_config(older)
+    body = client.get("/api/config").json()
+    assert body["features"]["profile_sidecar"] is True
+    assert body["profile_sidecars"] == app.DEFAULT_CONFIG["profile_sidecars"]
