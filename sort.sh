@@ -1219,6 +1219,68 @@ queue_nef_for_render() {
   return 0
 }
 
+write_profile_sidecar() {
+  # write_profile_sidecar <sorted raw> <camera identity>
+  # The operator applies one camera profile to every frame some bodies shoot
+  # (2026-09-02 library: Cobalt Standard (S) on 86% of A7CR and 69% of
+  # GFX100 II sidecars). A sidecar naming that profile lets Lightroom import
+  # the frame with it already selected; nothing else is set. Name only, no
+  # CameraProfileDigest: LrC resolves profiles by name per body (its own
+  # "Group: ..." sidecars carry no digest) and a digest goes stale the day the
+  # profile is updated. Detail-panel raw defaults are spelled out so an absent
+  # key can never read as zero sharpening. ln, not mv: it fails when a sidecar
+  # already exists, and once LrC owns the sidecar it holds the real edits.
+  local f=$1 camera=$2 profile dir stem tmp
+  local profile_re='^[A-Za-z0-9][A-Za-z0-9 ()._+/-]{0,62}$'
+  [[ -f "$PANEL_CONFIG" ]] || return 0
+  panel_flag profile_sidecar || return 0
+  # Bind the rule's body name before contains(): its argument is evaluated
+  # against the string being searched, where .camera does not exist.
+  profile=$(jq -r --arg cam "$camera" '
+    ($cam | ascii_downcase) as $body
+    | [ (.profile_sidecars? // [])[]? | select(type == "object")
+        | select((.camera | type) == "string" and (.profile | type) == "string")
+        | (.camera | ascii_downcase) as $rule_body
+        | select($body | contains($rule_body))
+        | .profile ][0] // empty' "$PANEL_CONFIG" 2>/dev/null) || return 0
+  [[ -n "$profile" ]] || return 0
+  # Re-validated here, as lens rules are, so a mangled config can never put
+  # markup into the sidecar.
+  if [[ ! "$profile" =~ $profile_re ]]; then
+    log "profile sidecar: rejected profile name for $(log_name "${f##*/}")"
+    return 0
+  fi
+  dir=${f%/*}; stem=${f##*/}; stem=${stem%.*}
+  tmp="$dir/.$stem.xmp.$BASHPID.tmp"
+  if printf '%s\n' \
+      '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="camera-sorter">' \
+      ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' \
+      '  <rdf:Description rdf:about=""' \
+      '    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"' \
+      '   crs:Version="18.4"' \
+      '   crs:ProcessVersion="15.4"' \
+      '   crs:WhiteBalance="As Shot"' \
+      "   crs:CameraProfile=\"$profile\"" \
+      '   crs:Sharpness="40"' \
+      '   crs:SharpenRadius="+1.0"' \
+      '   crs:SharpenDetail="25"' \
+      '   crs:SharpenEdgeMasking="0"' \
+      '   crs:LuminanceSmoothing="0"' \
+      '   crs:ColorNoiseReduction="25"' \
+      '   crs:ColorNoiseReductionDetail="50"' \
+      '   crs:ColorNoiseReductionSmoothness="50"' \
+      '   crs:ToneCurveName2012="Linear"' \
+      '   crs:HasSettings="True"' \
+      '   crs:AlreadyApplied="False"/>' \
+      ' </rdf:RDF>' \
+      '</x:xmpmeta>' > "$tmp" 2>/dev/null \
+    && ln -- "$tmp" "$dir/$stem.xmp" 2>/dev/null; then
+    log "profile sidecar: $(log_name "$stem.xmp") -> $profile"  # profile passed profile_re, needs no escaping
+  fi
+  rm -f -- "$tmp" 2>/dev/null
+  return 0
+}
+
 prune_nef_queue() {
   [[ -n "$NEF_QUEUE" && -d "$NEF_QUEUE" ]] || return 0
   # ctime, not mtime: SMB drops preserve month-old mtimes, and a fresh hard
@@ -1828,6 +1890,7 @@ process() {
     moved_log=$(log_name "$MOVED_DEST")
     log "ok: $log_base -> $date/$type/$moved_log"
     enqueue_notify "$camera" "$type" "$base"
+    if [[ "$type" == raw ]]; then write_profile_sidecar "$MOVED_DEST" "$camera"; fi
     case "${ext,,}" in
       nef|nrw)
         # MOVED_DEST is the absolute final path (suffix included). Massage

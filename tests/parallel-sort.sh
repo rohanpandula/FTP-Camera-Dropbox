@@ -2680,3 +2680,78 @@ assert_log_absent_for 'STUCK >' 3 \
 echo "PASS: fresh arrival with an old mtime is not reported stuck"
 
 stop_sorter
+
+rm -rf "$TEST_ROOT/data"
+mkdir -p "$TEST_ROOT/data/incoming" "$TEST_ROOT/data/.panel" "$TEST_ROOT/validator-state"
+: > "$TEST_ROOT/validator-release"
+# The stub body is "TEST CAMERA"; the first rule must never win, the match is
+# a case-insensitive substring like the panel's camera filters.
+cat > "$TEST_ROOT/data/.panel/config.json" <<'JSON'
+{"features": {"profile_sidecar": true},
+ "profile_sidecars": [{"camera": "NOT THIS BODY", "profile": "Wrong Profile"},
+                      {"camera": "test camera", "profile": "Cobalt Standard (S)"}]}
+JSON
+printf 'profiled raw fixture\n' > "$TEST_ROOT/data/incoming/profiled.dng"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/profiled.dng"
+: > "$TEST_ROOT/sorter.log"
+
+PATH="$ROOT/tests/fixtures/concurrent-validator:$PATH" \
+TEST_VALIDATOR_STATE_DIR="$TEST_ROOT/validator-state" \
+TEST_VALIDATOR_RELEASE_FILE="$TEST_ROOT/validator-release" \
+INCOMING="$TEST_ROOT/data/incoming" \
+SORTED="$TEST_ROOT/data/sorted" \
+QUARANTINE="$TEST_ROOT/data/quarantine" \
+PANEL_CONFIG="$TEST_ROOT/data/.panel/config.json" \
+STABLE_WAIT=1 \
+STABLE_SKIP_AGE=1 \
+SORT_WORKERS=1 \
+RECONCILE_IDLE=30 \
+NOTIFY_INTERVAL=3600 \
+RAW_MIN_BYTES_DEFAULT=1 \
+RAW_VALIDATE_TIMEOUT=60 \
+RAW_FULL_VALIDATE=1 \
+TG_CONFIG="$TEST_ROOT/telegram.json" \
+  /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
+SORTER_PID=$!
+
+wait_for_log 'profile sidecar: profiled.xmp -> Cobalt Standard' 60 \
+  || fail "matching body did not get a profile sidecar"
+sidecar="$TEST_ROOT/data/sorted/2026-08-02/raw/profiled.xmp"
+[[ -f "$sidecar" ]] || fail "sidecar did not land beside the sorted RAW"
+grep -Fq 'crs:CameraProfile="Cobalt Standard (S)"' "$sidecar" \
+  || fail "sidecar names the wrong profile"
+grep -Fq 'crs:Sharpness="40"' "$sidecar" \
+  || fail "sidecar lost the raw sharpening default"
+! grep -Fq 'Wrong Profile' "$sidecar" \
+  || fail "a non-matching rule leaked into the sidecar"
+[[ -z $(find "$TEST_ROOT/data/sorted/2026-08-02/raw" -name '.*.tmp') ]] \
+  || fail "sidecar temp file left behind"
+
+# An existing sidecar is Lightroom's and holds real edits: it must survive.
+printf 'operator edits\n' > "$TEST_ROOT/data/sorted/2026-08-02/raw/kept.xmp"
+printf 'kept raw fixture\n' > "$TEST_ROOT/data/incoming/kept.dng"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/kept.dng"
+wait_for_log 'ok: kept.dng -> 2026-08-02/raw/kept.dng' 60 \
+  || fail "second RAW did not sort"
+assert_log_absent_for 'profile sidecar: kept.xmp' 3 \
+  || fail "existing sidecar was reported as written"
+[[ $(cat "$TEST_ROOT/data/sorted/2026-08-02/raw/kept.xmp") == 'operator edits' ]] \
+  || fail "existing sidecar was overwritten"
+
+# Switched off from the panel: the next RAW arrives bare, no restart needed.
+cat > "$TEST_ROOT/data/.panel/config.json" <<'JSON'
+{"features": {"profile_sidecar": false},
+ "profile_sidecars": [{"camera": "test camera", "profile": "Cobalt Standard (S)"}]}
+JSON
+printf 'bare raw fixture\n' > "$TEST_ROOT/data/incoming/bare.dng"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/bare.dng"
+wait_for_log 'ok: bare.dng -> 2026-08-02/raw/bare.dng' 60 \
+  || fail "third RAW did not sort"
+assert_log_absent_for 'profile sidecar: bare.xmp' 3 \
+  || fail "sidecar written while the switch is off"
+[[ ! -e "$TEST_ROOT/data/sorted/2026-08-02/raw/bare.xmp" ]] \
+  || fail "switch off still produced a sidecar"
+
+echo "PASS: profile sidecar names the body's camera profile and never clobbers"
+
+stop_sorter

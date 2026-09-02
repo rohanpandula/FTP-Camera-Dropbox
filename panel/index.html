@@ -1289,6 +1289,10 @@ const SWITCHES = {
     label: "Ask about unknown lenses",
     description: "Create an Attention item for unmatched non-Nikkor glass. Unanswered questions close without changing the file.",
   },
+  profile_sidecar: {
+    label: "Write profile sidecars",
+    description: "Drop a Lightroom sidecar beside each new RAW from a listed body, naming the camera profile below so the import already has it selected. Nothing else is set.",
+  },
 };
 
 function switchRow(key) {
@@ -1305,6 +1309,18 @@ function watchedFoldersMarkup() {
     <form class="inline-form" id="folder-form">
       <div class="field grow"><label for="folder-path">Add a folder under /data</label><input type="text" id="folder-path" name="folder" placeholder="/data/drop-here" autocomplete="off" required></div>
       <button class="button" type="submit">Watch folder</button>
+    </form>`;
+}
+
+function profileSidecarsMarkup() {
+  const rules = config.profile_sidecars || [];
+  return `<div class="sub-head"><h3>Profile by camera</h3><span class="section-note">Body name substring · first match wins · never overwrites an existing sidecar</span></div>
+    ${rules.length ? `<div class="register-list">${rules.map((rule, index) => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(rule.camera)}</div><div class="row-detail">${esc(rule.profile)}</div></div><button class="button quiet" type="button" data-remove-profile-rule="${index}">Remove</button></div>`).join("")}</div>` : '<p class="section-copy">No bodies listed. RAWs arrive without a sidecar and Lightroom applies its own defaults.</p>'}
+    <form class="inline-form" id="profile-form">
+      <div class="field grow"><label for="profile-camera">Camera body</label><input type="text" id="profile-camera" list="profile-camera-list" placeholder="ILCE-7CR" autocomplete="off" required></div>
+      <datalist id="profile-camera-list">${CAMERAS.map(camera => `<option value="${esc(camera.name)}"></option>`).join("")}</datalist>
+      <div class="field grow"><label for="profile-name">Camera profile</label><input type="text" id="profile-name" placeholder="Cobalt Standard (S)" autocomplete="off" required></div>
+      <button class="button" type="submit">Add rule</button>
     </form>`;
 }
 
@@ -1369,6 +1385,7 @@ async function renderAutomations() {
     ${sectionBlock("intake-group", "File intake", "Bring files in from folders beyond the camera FTP inbox", switchRow("watch_funnel") + watchedFoldersMarkup())}
     ${sectionBlock("outputs-group", "Outputs", "Optional derivatives and low-noise phone summaries", switchRow("nef_render_queue") + switchRow("telegram_notifications"))}
     ${sectionBlock("lens-group", "Lens metadata", "Name adapted glass consistently without touching exposure values", switchRow("lens_massage") + switchRow("ask_on_unknown") + lensRulesMarkup(forceRules))}
+    ${sectionBlock("lightroom-group", "Lightroom", "Sidecars the next import reads", switchRow("profile_sidecar") + profileSidecarsMarkup())}
   </div>`;
   if (forceRules) requestAnimationFrame(() => $("#lens-rules")?.scrollIntoView({ block: "start" }));
 }
@@ -1413,6 +1430,27 @@ async function removeFolder(index) {
     body: JSON.stringify({ watched_folders: config.watched_folders.filter((_, itemIndex) => itemIndex !== index) }),
   });
   toast(`Stopped watching ${removed}`);
+  await renderAutomations();
+}
+
+async function addProfileRule(camera, profile) {
+  config = await api("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile_sidecars: [...(config.profile_sidecars || []), { camera, profile }] }),
+  });
+  toast(`${camera}: ${profile}`);
+  await renderAutomations();
+}
+
+async function removeProfileRule(index) {
+  const removed = (config.profile_sidecars || [])[index];
+  config = await api("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile_sidecars: (config.profile_sidecars || []).filter((_, itemIndex) => itemIndex !== index) }),
+  });
+  toast(`Removed ${removed ? removed.camera : "rule"}`);
   await renderAutomations();
 }
 
@@ -1564,6 +1602,9 @@ view.addEventListener("click", async event => {
     const folderButton = target.closest("[data-remove-folder]");
     if (folderButton) { await removeFolder(Number(folderButton.dataset.removeFolder)); return; }
 
+    const profileButton = target.closest("[data-remove-profile-rule]");
+    if (profileButton) { await removeProfileRule(Number(profileButton.dataset.removeProfileRule)); return; }
+
     const editButton = target.closest("[data-edit-rule]");
     if (editButton) { editRule(Number(editButton.dataset.editRule)); return; }
 
@@ -1621,6 +1662,10 @@ view.addEventListener("submit", async event => {
     if (event.target.id === "folder-form") {
       const path = $("#folder-path").value.trim();
       if (path) await addFolder(path);
+    } else if (event.target.id === "profile-form") {
+      const camera = $("#profile-camera").value.trim();
+      const profile = $("#profile-name").value.trim();
+      if (camera && profile) await addProfileRule(camera, profile);
     } else if (event.target.id === "lens-rule-form") {
       const submit = event.target.querySelector("[type='submit']");
       submit.disabled = true;

@@ -67,12 +67,14 @@ IMG_EXTS = {".jpg", ".jpeg", ".tif", ".tiff"}
 # item if 48 MP phones make this slow.
 HEIF_EXTS = {".hif", ".heif", ".heic"}
 FEATURES = ("lens_massage", "nef_render_queue", "telegram_notifications", "watch_funnel",
-            "ask_on_unknown")
+            "ask_on_unknown", "profile_sidecar")
 
 # Matches the validation sort.sh re-applies before writing tags.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./-]{0,62}$")
 INFO_RE = re.compile(r"^[0-9][0-9. ]{0,30}$")
 FOCAL_RE = re.compile(r"^[0-9]{1,4}(\.[0-9])?$")
+# Camera profile names land inside an XMP attribute the sorter writes.
+PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ()._+/-]{0,62}$")
 
 DEFAULT_CONFIG = {
     "features": {k: True for k in FEATURES},
@@ -85,6 +87,12 @@ DEFAULT_CONFIG = {
          "set_focal_length": "35"},
     ],
     "watched_folders": [],
+    # Profile the sorter names in a sidecar beside each new RAW from a body
+    # whose name contains `camera`, so Lightroom imports it already selected.
+    "profile_sidecars": [
+        {"camera": "ILCE-7CR", "profile": "Cobalt Standard (S)"},
+        {"camera": "GFX100 II", "profile": "Cobalt Standard (S)"},
+    ],
     # Buttons offered when the sorter meets glass no rule matches — over
     # Telegram and on the Decisions tab. Unanswered questions auto-close
     # after ask_timeout_hours with no EXIF change.
@@ -252,6 +260,23 @@ def validate_config(cfg: dict) -> None:
     for p in wf:
         validate_watch_folder(p)
 
+    ps = cfg.get("profile_sidecars", [])
+    if not isinstance(ps, list) or len(ps) > 16:
+        raise ValueError("profile_sidecars must be a list of at most 16 rules")
+    for i, r in enumerate(ps):
+        where = f"profile rule {i + 1}"
+        if not isinstance(r, dict):
+            raise ValueError(f"{where}: must be an object")
+        cam = r.get("camera")
+        if not isinstance(cam, str) or not 1 <= len(cam) <= 64 or not cam.isprintable():
+            raise ValueError(f"{where}: camera must be 1-64 printable chars (substring of the body name)")
+        prof = r.get("profile")
+        if not isinstance(prof, str) or not PROFILE_RE.match(prof):
+            raise ValueError(f"{where}: profile must be letters/digits/space/()._+/-, max 63")
+        extra = set(r) - {"camera", "profile"}
+        if extra:
+            raise ValueError(f"{where}: unknown fields {sorted(extra)}")
+
     hours = cfg.get("ask_timeout_hours", 12)
     if not isinstance(hours, (int, float)) or isinstance(hours, bool) or not 1 <= hours <= 168:
         raise ValueError("ask_timeout_hours must be 1-168")
@@ -288,7 +313,7 @@ def validate_config(cfg: dict) -> None:
             raise ValueError(f"{where}: unknown fields {sorted(extra)}")
 
     extra = set(cfg) - {"features", "lens_rules", "watched_folders",
-                        "ask_timeout_hours", "lens_presets"}
+                        "ask_timeout_hours", "lens_presets", "profile_sidecars"}
     if extra:
         raise ValueError(f"unknown config fields {sorted(extra)}")
 
@@ -601,7 +626,7 @@ async def api_config_put(request: Request):
     # rules and folders are whole-list edits by design.
     if isinstance(body.get("features"), dict):
         merged["features"] = {**merged.get("features", {}), **body["features"]}
-    for k in ("lens_rules", "watched_folders", "ask_timeout_hours", "lens_presets"):
+    for k in ("lens_rules", "watched_folders", "ask_timeout_hours", "lens_presets", "profile_sidecars"):
         if k in body:
             merged[k] = body[k]
     try:
