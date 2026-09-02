@@ -56,6 +56,11 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SIDECARS = {".xmp", ".acr"}
 RAW_EXTS = {".nef", ".arw", ".raf", ".dng", ".nrw", ".cr2", ".cr3"}
 IMG_EXTS = {".jpg", ".jpeg", ".tif", ".tiff"}
+# Camera HEIF (Fujifilm .HIF) carries JPEG previews as HEIF items, so it thumbs
+# like a RAW: extract, never decode the HEVC payload. iPhone .HEIC has no JPEG
+# item and stays a placeholder. ponytail: pillow-heif would decode those, add
+# it when a phone actually uploads here.
+HEIF_EXTS = {".hif", ".heif", ".heic"}
 FEATURES = ("lens_massage", "nef_render_queue", "telegram_notifications", "watch_funnel",
             "ask_on_unknown")
 
@@ -485,8 +490,14 @@ def source_orientation(path: Path) -> int:
         return 1
 
 
-def extract_preview(path: Path) -> bytes | None:
-    for tag in ("-PreviewImage", "-JpgFromRaw", "-OtherImage", "-ThumbnailImage"):
+RAW_PREVIEW_TAGS = ("-PreviewImage", "-JpgFromRaw", "-OtherImage", "-ThumbnailImage")
+# X100VI HIF: OtherImage is the 1920x1280 3:2 JPEG; PreviewImage is only 640x480
+# at 4:3, so the RAW order would pick the wrong one.
+HEIF_PREVIEW_TAGS = ("-OtherImage", "-PreviewImage", "-ThumbnailImage")
+
+
+def extract_preview(path: Path, tags: tuple[str, ...] = RAW_PREVIEW_TAGS) -> bytes | None:
+    for tag in tags:
         try:
             out = subprocess.run(
                 ["exiftool", "-b", tag, "-api", "largefilesupport=1", str(path)],
@@ -505,7 +516,8 @@ def api_thumb(f: str):
     except ValueError:
         return err("bad path")
     ext = path.suffix.lower()
-    if not path.is_file() or ext not in RAW_EXTS | IMG_EXTS:
+    embedded = ext in RAW_EXTS or ext in HEIF_EXTS
+    if not path.is_file() or not (embedded or ext in IMG_EXTS):
         return err("no preview", 404)
     try:
         st = path.stat()
@@ -521,7 +533,7 @@ def api_thumb(f: str):
         return err("file too large to preview", 404)
 
     with _thumb_gate:
-        raw = extract_preview(path) if ext in RAW_EXTS else None
+        raw = extract_preview(path, HEIF_PREVIEW_TAGS if ext in HEIF_EXTS else RAW_PREVIEW_TAGS) if embedded else None
         if raw is None and ext in IMG_EXTS:
             try:
                 raw = path.read_bytes()
@@ -538,7 +550,7 @@ def api_thumb(f: str):
                 pass
             if own != 1:
                 img = ImageOps.exif_transpose(img)
-            elif ext in RAW_EXTS:
+            elif embedded:  # HIF previews are stored unrotated too (X100VI, outer Orientation 8)
                 o = source_orientation(path)
                 if o in _TRANSPOSE:
                     img = img.transpose(_TRANSPOSE[o])

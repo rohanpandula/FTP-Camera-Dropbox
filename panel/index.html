@@ -898,7 +898,7 @@ const ROUTE_ALIASES = {
   switches: "automations",
   rules: "automations",
 };
-const THUMB_V = 2;
+const THUMB_V = 3;
 let rawRoute = location.hash.slice(1) || "now";
 let tab = normalizeRoute(rawRoute);
 let attentionCount = 0;
@@ -1055,7 +1055,7 @@ function firstRun() {
 }
 
 function canPreview(name) {
-  return /\.(nef|arw|raf|dng|nrw|cr2|cr3|jpe?g|tiff?)$/i.test(name);
+  return /\.(nef|arw|raf|dng|nrw|cr2|cr3|jpe?g|tiff?|hif|heif|heic)$/i.test(name);
 }
 
 function proofCard(file, options = {}) {
