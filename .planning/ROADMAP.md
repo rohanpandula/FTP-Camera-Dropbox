@@ -14,7 +14,7 @@ Four phases, each shippable on its own. Phase 1 puts the code that is actually r
 - [x] **Phase 1: Baseline** - LRU registry on main's lineage, macOS-clean tests, tidy checkout (completed 2026-09-01)
 - [x] **Phase 2: Sorter Correctness** - HEIF trailing-pad tolerance and ctime-based STUCK scan (completed 2026-09-01)
 - [x] **Phase 3: Observability and Panel Honesty** - abort alerts, ctime age, exception types, byte-verified prune (completed 2026-09-01)
-- [ ] **Phase 4: Deploy and Verify** - human-gated rollout to tower with end-to-end proof
+- [x] **Phase 4: Deploy and Verify** - human-gated rollout to tower with end-to-end proof (completed 2026-09-02)
 
 ## Phase Details
 
@@ -105,7 +105,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 04-02-PLAN.md — (wave 2, needs 04-01, `autonomous: false`) execute the runbook on tower: build (auto), swap sorter / swap panel / install healthcheck (checkpoints), retry DSCF8283.HIF, fire the abort probe, confirm the Telegram alert (checkpoint), 10-min soak, optional debris cleanup (checkpoint, declinable)
+- [x] 04-02-PLAN.md — (wave 2, needs 04-01, `autonomous: false`) execute the runbook on tower: build (auto), swap sorter / swap panel / install healthcheck (checkpoints), retry DSCF8283.HIF, fire the abort probe, confirm the Telegram alert (checkpoint), 10-min soak, optional debris cleanup (checkpoint, declinable)
 
 ## Progress
 
@@ -117,4 +117,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 (2 and 3 may run in paralle
 | 1. Baseline | 3/3 | Complete    | 2026-09-01 |
 | 2. Sorter Correctness | 1/1 | Complete    | 2026-09-01 |
 | 3. Observability and Panel Honesty | 3/3 | Complete    | 2026-09-01 |
-| 4. Deploy and Verify | 1/2 | In Progress|  |
+| 4. Deploy and Verify | 2/2 | Complete    | 2026-09-02 |

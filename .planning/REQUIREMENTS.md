@@ -29,7 +29,7 @@
 
 ### Deploy
 
-- [ ] **DEPLOY-01**: On tower, `camera-sorter` and `dropbox-panel` run images built from the merged milestone commit; `dropbox-panel` mounts `telegram.json` and `/health` read-only; the healthcheck script on `/boot/config/scripts/` matches `contrib/unraid/`; `DSCF8283.HIF` retried through the panel lands in `sorted/2026-08-22/heif/`; `tests/pure-ftpd-abort.py` run from the Mac yields exactly one abort alert within one cron interval.
+- [x] **DEPLOY-01**: On tower, `camera-sorter` and `dropbox-panel` run images built from the merged milestone commit; `dropbox-panel` mounts `telegram.json` and `/health` read-only; the healthcheck script on `/boot/config/scripts/` matches `contrib/unraid/`; `DSCF8283.HIF` retried through the panel lands in `sorted/2026-08-22/heif/`; `tests/pure-ftpd-abort.py` run from the Mac yields exactly one abort alert within one cron interval.
 - [x] **DEPLOY-02**: README and `contrib/unraid/` docs describe the abort alert and the read-only `telegram.json` mount for the panel.
 
 ## v2 Requirements
@@ -68,7 +68,7 @@ Deferred to a later milestone. Tracked but not in the current roadmap.
 | OBS-02 | Phase 3 | Complete |
 | OBS-03 | Phase 3 | Complete |
 | PANEL-01 | Phase 3 | Complete |
-| DEPLOY-01 | Phase 4 | Pending |
+| DEPLOY-01 | Phase 4 | Complete |
 | DEPLOY-02 | Phase 4 | Complete |
 | OBS-04 | v2 (deferred) | Deferred |
 | OBS-05 | v2 (deferred) | Deferred |
