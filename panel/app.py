@@ -33,6 +33,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image, ImageOps
+try:  # iPhone HEIC has no JPEG item to extract; Pillow needs a HEIF decoder for it
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:  # outside the image: camera HIF still thumbs through exiftool
+    pass
 
 log = logging.getLogger("panel")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] panel: %(message)s")
@@ -57,9 +62,9 @@ SIDECARS = {".xmp", ".acr"}
 RAW_EXTS = {".nef", ".arw", ".raf", ".dng", ".nrw", ".cr2", ".cr3"}
 IMG_EXTS = {".jpg", ".jpeg", ".tif", ".tiff"}
 # Camera HEIF (Fujifilm .HIF) carries JPEG previews as HEIF items, so it thumbs
-# like a RAW: extract, never decode the HEVC payload. iPhone .HEIC has no JPEG
-# item and stays a placeholder. ponytail: pillow-heif would decode those, add
-# it when a phone actually uploads here.
+# like a RAW: extract first. iPhone .HEIC has no JPEG item, so it falls through
+# to a full pillow-heif decode. ponytail: full decode, use the HEIF thumbnail
+# item if 48 MP phones make this slow.
 HEIF_EXTS = {".hif", ".heif", ".heic"}
 FEATURES = ("lens_massage", "nef_render_queue", "telegram_notifications", "watch_funnel",
             "ask_on_unknown")
@@ -533,8 +538,9 @@ def api_thumb(f: str):
         return err("file too large to preview", 404)
 
     with _thumb_gate:
-        raw = extract_preview(path, HEIF_PREVIEW_TAGS if ext in HEIF_EXTS else RAW_PREVIEW_TAGS) if embedded else None
-        if raw is None and ext in IMG_EXTS:
+        preview = extract_preview(path, HEIF_PREVIEW_TAGS if ext in HEIF_EXTS else RAW_PREVIEW_TAGS) if embedded else None
+        raw = preview
+        if raw is None and (ext in IMG_EXTS or ext in HEIF_EXTS):
             try:
                 raw = path.read_bytes()
             except OSError:
@@ -550,8 +556,8 @@ def api_thumb(f: str):
                 pass
             if own != 1:
                 img = ImageOps.exif_transpose(img)
-            elif embedded:  # HIF previews are stored unrotated too (X100VI, outer Orientation 8)
-                o = source_orientation(path)
+            elif preview is not None:  # embedded previews are stored unrotated (ARW, X100VI HIF);
+                o = source_orientation(path)  # a pillow-heif decode already applied the file's own tag
                 if o in _TRANSPOSE:
                     img = img.transpose(_TRANSPOSE[o])
             img.thumbnail((480, 480))

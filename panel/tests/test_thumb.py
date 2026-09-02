@@ -58,11 +58,17 @@ def test_hif_thumb_prefers_other_image_and_rotates_like_raw(monkeypatch, orienta
     assert [c[2] for c in calls if c[1] == "-b"][0] == "-OtherImage"
 
 
-def test_heic_without_jpeg_item_stays_placeholder(monkeypatch):
+def test_heic_without_jpeg_item_decodes_and_is_not_rotated_twice(monkeypatch):
     HEIF_DIR.mkdir(parents=True, exist_ok=True)
-    (HEIF_DIR / "IMG_0001.HEIC").write_bytes(b"\x00" * 5000)
-    _stub_exiftool(monkeypatch, [], {}, 1)
+    # A real HEIC (pillow-heif encodes too): 60x40 pixels tagged Orientation 6.
+    # pillow-heif applies that tag on read, so the file's own orientation must
+    # not be applied a second time the way it is for an extracted preview.
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (60, 40), (10, 200, 40)).save(HEIF_DIR / "IMG_0001.HEIC", format="HEIF", quality=50, exif=exif.tobytes())
+    _stub_exiftool(monkeypatch, [], {}, 6)  # no JPEG item; exiftool would also report 6
 
     response = client.get("/api/thumb", params={"v": 3, "f": "2026-09-01/heif/IMG_0001.HEIC"})
-    assert response.status_code == 404
-    assert response.json()["error"] == "no embedded preview"
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert Image.open(io.BytesIO(response.content)).size == (40, 60)

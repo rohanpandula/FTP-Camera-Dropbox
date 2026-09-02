@@ -23,7 +23,7 @@ A self-hosted camera intake pipeline: cameras push over Wi-Fi FTP (and Frame.io 
 ## Technology Stack
 
 - **Sorter** (`sort.sh`, ~2,100 lines): Bash 5 on `alpine:3.24.1` with `inotify-tools`, `exiftool`, `coreutils`, `findutils`, `curl`, `jq`, `util-linux` (`flock`), `libraw-tools` (`raw-identify`, `simple_dcraw`). Runs as 99:100. Built by the root `Dockerfile`.
-- **Panel** (`panel/app.py`, ~1,100 lines; `panel/index.html`): Python 3.12 on `python:3.12-alpine`, FastAPI 0.115, uvicorn 0.30, Pillow 10, `exiftool` via `subprocess`. Single process, no database, filesystem is the source of truth. Port 8484.
+- **Panel** (`panel/app.py`, ~1,100 lines; `panel/index.html`): Python 3.12 on `python:3.12-alpine`, FastAPI 0.115, uvicorn 0.30, Pillow 11 with pillow-heif for HEIC decode, `exiftool` via `subprocess`. Single process, no database, filesystem is the source of truth. Port 8484.
 - **Frame.io mirror** (`frameio-mirror/app.py`, ~3,900 lines): Python 3.12, FastAPI, `httpx`, uvicorn. Webhook receiver plus reconcile loop; private staging mount; durable JSON state file.
 - **FTP** (`pure-ftpd/`): vendored fork of pure-ftpd 1.0.50 with two patches (never publish aborted uploads; docker capabilities). `ADDED_FLAGS=-d -d -0`.
 - **Ops scripts** (`contrib/unraid/*.sh`): Bash, run by root cron on Unraid; Telegram via `curl`; state under `/var/lib/ftpdropbox-health/` (root 0700).
@@ -47,7 +47,7 @@ A self-hosted camera intake pipeline: cameras push over Wi-Fi FTP (and Frame.io 
 
 ## Python (`panel/app.py`, `frameio-mirror/app.py`)
 
-- Stdlib first; the only third-party imports are FastAPI/Starlette, httpx (mirror), Pillow (panel). Do not add packages.
+- Stdlib first; the only third-party imports are FastAPI/Starlette, httpx (mirror), Pillow and pillow-heif (panel). Do not add packages.
 - Atomic writes: `tempfile.mkstemp` in the target dir → write → `fsync` → `os.replace`. Never `open(path, "w")` on shared state.
 - Never log secrets or pre-signed URLs; log exceptions as `%s: %r` with `type(exc).__name__` so empty-message exceptions stay diagnosable.
 - Path inputs from HTTP go through `safe_child` (panel) or the pinned-fd helpers (mirror). Reject, do not normalize.
