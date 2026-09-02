@@ -31,6 +31,7 @@
     --rule-dark: #747b75;
     --signal: #ee3f29;
     --signal-dark: #a61f13;
+    --signal-fill: #d52f18; /* vermilion deep enough for white text at 4.9:1 */
     --link: #1748c7;
     --healthy: #08744f;
     --warning: #9b4a00;
@@ -43,6 +44,14 @@
     --paper-wash: linear-gradient(rgb(233 236 229 / .7), rgb(233 236 229 / .7)), var(--paper-texture);
     --sheet-wash: linear-gradient(rgb(248 249 245 / .74), rgb(248 249 245 / .74)), var(--paper-texture);
     --max: 1440px;
+    --gutter: clamp(16px, 2.5vw, 32px);
+    --header-h: 56px;
+    --s1: 4px;
+    --s2: 8px;
+    --s3: 12px;
+    --s4: 16px;
+    --s6: 24px;
+    --s8: 32px;
   }
 
   * { box-sizing: border-box; }
@@ -54,7 +63,7 @@
     background-image: var(--paper-wash);
     background-size: auto, 512px 512px;
     color: var(--ink);
-    font: 15px/1.48 var(--sans);
+    font: 14px/1.45 var(--sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -79,9 +88,10 @@
 
   :focus-visible {
     outline: 3px solid var(--focus);
-    outline-offset: 3px;
+    outline-offset: 2px;
   }
 
+  /* Header: one 56px index bar. Wordmark, tabs, live state. */
   .app-header {
     position: sticky;
     top: 0;
@@ -93,31 +103,24 @@
   }
   .header-inner {
     width: min(100%, var(--max));
+    height: var(--header-h);
     margin: 0 auto;
-    display: grid;
-    grid-template-columns: minmax(440px, 1fr) minmax(580px, 1fr);
-    grid-template-rows: 84px 28px;
-    grid-template-areas:
-      "brand nav"
-      "state nav";
+    display: flex;
     align-items: stretch;
-    min-height: 112px;
   }
   .brand {
-    grid-area: brand;
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 12px clamp(20px, 2.7vw, 40px);
+    gap: 10px;
+    padding: 0 var(--gutter);
+    border-right: 1px solid var(--rule-dark);
     color: var(--ink);
     text-decoration: none;
-    border-right: 1px solid var(--rule-dark);
   }
   .brand-mark {
     position: relative;
-    display: none;
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     flex: none;
     border: 1px solid var(--ink);
   }
@@ -126,50 +129,44 @@
     position: absolute;
     left: -1px;
     right: -1px;
-    top: 12px;
-    height: 4px;
+    top: 9px;
+    height: 3px;
     background: var(--signal);
   }
   .brand-mark::after {
     content: "";
     position: absolute;
-    inset: 7px;
+    inset: 5px;
     border-radius: 50%;
     background: var(--sheet);
     border: 2px solid var(--ink);
   }
   .brand-name {
     white-space: nowrap;
-    font: 850 clamp(42px, 4.15vw, 60px)/.82 var(--display);
-    letter-spacing: -.025em;
+    font: 800 24px/1 var(--display);
+    letter-spacing: -.01em;
     text-transform: uppercase;
   }
-  .brand-name span { display: inline; }
   .brand-name span + span::before { content: " "; }
 
-  .primary-nav { grid-area: nav; display: flex; align-items: stretch; }
+  .primary-nav { display: flex; align-items: stretch; }
   .primary-nav a {
     position: relative;
-    min-width: 0;
-    min-height: 112px;
-    flex: 1;
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 8px;
-    padding: 0 18px;
+    padding: 0 20px;
     border-right: 1px solid var(--rule-dark);
     color: var(--ink);
     text-decoration: none;
-    font: 750 clamp(18px, 1.7vw, 23px)/1 var(--display);
-    letter-spacing: .01em;
+    font: 750 15px/1 var(--display);
+    letter-spacing: .04em;
     text-transform: uppercase;
-    transition: background 180ms ease-out, color 180ms ease-out;
+    transition: background 150ms ease-out, color 150ms ease-out;
   }
-  .primary-nav a:first-child { border-left: 1px solid var(--rule-dark); }
   .primary-nav a:hover { background: var(--sheet-2); }
   .primary-nav a[aria-current="page"] {
-    background: var(--signal);
+    background: var(--signal-fill);
     color: #fff;
   }
   .primary-nav a[aria-current="page"]::after {
@@ -177,11 +174,11 @@
     position: absolute;
     right: -1px;
     top: -1px;
-    border-top: 14px solid var(--paper);
-    border-left: 14px solid transparent;
+    border-top: 10px solid var(--paper);
+    border-left: 10px solid transparent;
   }
   .nav-count {
-    min-width: 21px;
+    min-width: 20px;
     padding: 3px 5px;
     border: 1px solid currentColor;
     font: 700 10px/1 var(--mono);
@@ -189,16 +186,12 @@
   }
 
   .header-state {
-    grid-area: state;
-    justify-self: stretch;
+    margin-left: auto;
     min-width: 0;
-    min-height: 28px;
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 10px;
-    padding: 4px clamp(20px, 2.7vw, 40px);
-    border-top: 1px solid var(--rule-dark);
+    gap: 8px;
+    padding: 0 var(--gutter);
   }
   .state-dot {
     width: 10px;
@@ -210,363 +203,175 @@
   .state-dot.ok { background: var(--healthy); }
   .state-dot.fail { background: var(--danger); }
   .state-dot.active { background: var(--signal); animation: breathe 1.6s ease-in-out infinite; }
-  .header-state-copy strong {
-    display: inline;
-    font-size: 11px;
-    font-weight: 700;
+  .header-state-copy {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
   }
+  .header-state-copy strong { font-weight: 700; }
   .header-state-copy span {
-    display: inline;
-    margin-left: 10px;
+    margin-left: 8px;
     color: var(--ink-soft);
-    font: 11px/1.35 var(--mono);
+    font: 11px/1.3 var(--mono);
   }
 
   main {
     width: min(100%, var(--max));
-    min-height: calc(100dvh - 113px);
+    min-height: calc(100dvh - var(--header-h) - 1px);
     margin: 0 auto;
     background-color: var(--sheet);
     background-image: var(--sheet-wash);
     background-size: auto, 512px 512px;
     border-inline: 1px solid var(--rule-dark);
   }
-  .page { animation: page-in 360ms cubic-bezier(.16, 1, .3, 1) both; }
-  .page.no-animation { animation: none; }
+
+  /* Page heads: one line of title + facts, optional one-line copy. */
   .page-head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
-    align-items: end;
-    gap: 28px;
-    padding: clamp(28px, 5vw, 64px) clamp(20px, 4vw, 56px) 30px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px var(--s4);
+    padding: var(--s6) var(--gutter) var(--s4);
     border-bottom: 1px solid var(--ink);
   }
-  .page-head h1,
-  .verdict-title {
-    max-width: 13ch;
+  .page-head h1 {
     margin: 0;
-    font: 800 clamp(50px, 7vw, 92px)/.88 var(--display);
-    letter-spacing: -.025em;
-    text-wrap: balance;
-  }
-  .page-head p {
-    max-width: 62ch;
-    margin: 14px 0 0;
-    color: var(--ink-soft);
-    font-size: 16px;
-    text-wrap: pretty;
+    font: 800 26px/1 var(--display);
+    letter-spacing: -.01em;
+    text-transform: uppercase;
   }
   .page-meta {
     margin: 0;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(120px, 1fr));
-    border: 1px solid var(--rule-dark);
+    color: var(--ink-soft);
+    font: 700 12px/1.3 var(--mono);
+    font-variant-numeric: tabular-nums;
   }
-  .page-meta div { padding: 12px 14px; }
-  .page-meta div + div { border-left: 1px solid var(--rule-dark); }
-  .page-meta dt,
+  .page-actions { margin-left: auto; }
+  .page-copy {
+    flex-basis: 100%;
+    max-width: 72ch;
+    margin: 2px 0 0;
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-wrap: pretty;
+  }
+
+  /* Now: the status strip answers the five questions in one row. */
+  .status-strip {
+    display: grid;
+    grid-template-columns: minmax(280px, 2fr) repeat(4, minmax(0, 1fr));
+    border-bottom: 1px solid var(--ink);
+  }
+  .status-strip > * {
+    min-width: 0;
+    padding: var(--s4);
+    border-left: 1px solid var(--rule-dark);
+  }
+  .status-strip > :first-child { padding-inline: var(--gutter); border-left: 0; }
+  .verdict h1 {
+    margin: 0;
+    font: 800 26px/1 var(--display);
+    letter-spacing: -.01em;
+    text-wrap: balance;
+  }
+  .verdict.is-attention h1 { color: var(--signal-dark); }
+  .verdict p { margin: 6px 0 0; color: var(--ink-soft); font-size: 13px; }
   .fact-label,
-  .section-label,
-  .meta-label {
+  .section-note,
+  label,
+  .field-label {
     color: var(--ink-soft);
     font: 700 10px/1.2 var(--mono);
     letter-spacing: .08em;
     text-transform: uppercase;
   }
-  .page-meta dd {
-    margin: 5px 0 0;
-    font: 700 15px/1.2 var(--mono);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .verdict-band {
-    display: grid;
-    grid-template-columns: minmax(500px, .9fr) minmax(600px, 1.1fr);
-    border-bottom: 1px solid var(--ink);
-  }
-  .verdict-copy { padding: clamp(28px, 3.2vw, 46px) clamp(24px, 3.2vw, 46px) 28px; }
-  .verdict-title { color: var(--signal); }
-  .verdict-sub {
-    max-width: 58ch;
-    margin: 18px 0 0;
-    color: var(--ink-soft);
-    font-size: clamp(16px, 1.7vw, 21px);
-    text-wrap: pretty;
-  }
-  .verdict-facts {
-    margin: 0;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    border-left: 1px solid var(--ink);
-  }
-  .verdict-facts > div {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    min-width: 0;
-    padding: clamp(22px, 2.4vw, 34px);
-  }
-  .verdict-facts > div + div { border-left: 1px solid var(--rule-dark); }
   .fact-value {
     display: block;
-    margin-top: 8px;
-    font: 750 clamp(30px, 4vw, 54px)/.95 var(--display);
-    letter-spacing: -.02em;
+    margin-top: 6px;
+    font: 750 22px/1 var(--display);
+    letter-spacing: -.01em;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .fact-detail {
     display: block;
-    margin-top: 8px;
+    margin-top: 5px;
     color: var(--ink-soft);
-    font: 12px/1.45 var(--mono);
+    font: 11px/1.35 var(--mono);
+    text-wrap: pretty;
   }
   .status-good { color: var(--healthy); }
   .status-bad { color: var(--danger); }
 
-  .intake {
-    padding: 18px clamp(24px, 3.2vw, 46px) 20px;
-    border-bottom: 1px solid var(--ink);
+  /* Sections: heading row, then rows. Rules separate, spacing groups. */
+  .section {
+    padding: var(--s4) var(--gutter) var(--s6);
+    border-bottom: 1px solid var(--rule-dark);
   }
-  .intake-title-row,
-  .section-title-row {
+  .section-head,
+  .sub-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 18px;
+    gap: 4px var(--s4);
+    margin-bottom: var(--s3);
   }
-  .section-title-row h2,
-  .section-title {
+  .section-head h2 {
     margin: 0;
-    font: 750 clamp(24px, 3vw, 36px)/1 var(--display);
-    letter-spacing: -.01em;
+    font: 750 16px/1 var(--display);
+    letter-spacing: .03em;
     text-transform: uppercase;
   }
-  .intake-note { color: var(--ink-soft); font: 11px/1.4 var(--mono); }
-  .intake-track {
-    position: relative;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    isolation: isolate;
-  }
-  .intake-track::before,
-  .intake-track::after {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    top: 20px;
-    left: 5%;
-    right: 5%;
-    height: 2px;
-    background: var(--rule-dark);
-  }
-  .intake-track.active::after {
-    background: var(--signal);
-    transform-origin: left;
-    animation: intake-line 2.6s cubic-bezier(.16, 1, .3, 1) infinite;
-  }
-  .stage { min-width: 0; text-align: center; }
-  .stage-node {
-    width: 18px;
-    height: 18px;
-    margin: 12px auto 14px;
-    border-radius: 50%;
-    border: 3px solid var(--sheet);
-    background: var(--ink);
-    box-shadow: 0 0 0 1px var(--ink);
-  }
-  .active .stage-node { background: var(--signal); box-shadow: 0 0 0 1px var(--signal); }
-  .stage-name {
-    display: block;
-    font: 750 17px/1 var(--display);
-    text-transform: uppercase;
-  }
-  .stage-value {
-    display: block;
-    margin-top: 6px;
-    font: 700 13px/1.2 var(--mono);
-    font-variant-numeric: tabular-nums;
-  }
-  .stage-detail { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12px; }
-
-  .now-grid {
-    display: grid;
-    grid-template-columns: minmax(250px, 286px) minmax(0, 1fr);
-    align-items: stretch;
-    border-bottom: 1px solid var(--ink);
-  }
-  .recent { min-width: 0; padding: 26px clamp(22px, 2.5vw, 36px) 30px; }
-  .attention-register {
-    position: relative;
-    padding: 0 22px 30px;
-    background-color: #f1d8d1;
-    background-image: linear-gradient(rgb(241 216 209 / .78), rgb(241 216 209 / .78)), var(--paper-texture);
-    background-size: auto, 512px 512px;
-    border-right: 1px solid var(--ink);
-    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
-  }
-  .attention-register h2 {
-    margin: 0 -22px 12px;
-    padding: 15px 22px 14px;
-    background: var(--signal);
-    color: #fff;
-    font: 800 30px/1 var(--display);
-    text-transform: uppercase;
-  }
-  .attention-item { padding: 16px 0; border-top: 1px solid color-mix(in srgb, var(--danger) 44%, transparent); }
-  .attention-item:first-of-type { border-top-color: var(--danger); }
-  .attention-item strong { display: block; font: 700 20px/1.1 var(--display); }
-  .attention-item p { margin: 7px 0 0; color: #54251f; font-size: 13px; }
-  .attention-clear { margin: 0; color: #2f4d3f; }
-
-  .proof-grid,
-  .library-grid {
-    display: grid;
-    gap: 1px;
-    background: var(--rule-dark);
-    border: 1px solid var(--rule-dark);
-  }
-  .proof-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .library-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .proof-grid {
-    gap: 0;
-    background: transparent;
-    border-right: 0;
-  }
-  .proof-grid .proof { border-right: 1px solid var(--rule-dark); }
-  .proof {
-    min-width: 0;
+  .sub-head { margin-top: var(--s4); }
+  .sub-head h3 {
     margin: 0;
-    background: var(--sheet);
-  }
-  .proof-media {
-    position: relative;
-    aspect-ratio: 4 / 3;
-    overflow: hidden;
-    background: var(--sheet-2);
-  }
-  .proof-media img {
-    width: 100%;
-    height: 100%;
-    display: block;
-    object-fit: cover;
-    transition: transform 280ms cubic-bezier(.16, 1, .3, 1), filter 280ms ease-out;
-  }
-  .proof:hover img { transform: scale(1.018); filter: contrast(1.03); }
-  .media-placeholder {
-    width: 100%;
-    height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 18px;
-    color: var(--ink-soft);
-    font: 700 12px/1.3 var(--mono);
-    letter-spacing: .08em;
-    text-align: center;
+    font: 750 13px/1 var(--display);
+    letter-spacing: .04em;
     text-transform: uppercase;
   }
-  .proof figcaption { padding: 14px 14px 16px; }
-  .file-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font: 700 13px/1.25 var(--mono);
+  .section-note {
+    text-transform: none;
+    letter-spacing: 0;
+    font: 11px/1.4 var(--mono);
   }
-  .file-meta {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 7px;
-    color: var(--ink-soft);
-    font: 11px/1.25 var(--mono);
-    font-variant-numeric: tabular-nums;
-  }
-  .file-destination {
-    display: inline-block;
-    margin-top: 12px;
-    color: var(--link);
-    font: 700 11px/1.3 var(--mono);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
+  .section-copy { max-width: 70ch; margin: 0 0 var(--s3); color: var(--ink-soft); font-size: 13px; text-wrap: pretty; }
 
-  .mechanism {
+  .attention-block { border-top: 3px solid var(--signal); }
+  .attention-block h2 { color: var(--signal-dark); }
+  .attention-list { border-top: 1px solid var(--rule-dark); }
+  .attention-row {
     display: grid;
-    grid-template-columns: minmax(220px, .9fr) repeat(4, minmax(0, 1fr));
-    border-bottom: 1px solid var(--ink);
-    counter-reset: protection;
-  }
-  .mechanism-heading {
-    display: flex;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    padding: 22px clamp(18px, 2.4vw, 34px);
-    font: 800 27px/.95 var(--display);
-    text-transform: uppercase;
+    gap: var(--s4);
+    min-height: 44px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink);
+    text-decoration: none;
   }
-  .mechanism article {
-    counter-increment: protection;
-    padding: 20px clamp(15px, 1.7vw, 24px) 24px;
-    border-left: 1px solid var(--rule-dark);
+  .attention-row:hover .row-main strong { text-decoration: underline; text-underline-offset: 3px; }
+  .attention-row strong { display: block; font-size: 14px; }
+  .chevron {
+    width: 9px;
+    height: 9px;
+    margin-right: 6px;
+    border-right: 2px solid var(--link);
+    border-bottom: 2px solid var(--link);
+    transform: rotate(-45deg);
   }
-  .mechanism article::before {
-    content: "0" counter(protection);
-    display: block;
-    margin-bottom: 10px;
-    color: var(--signal-dark);
-    font: 700 10px/1 var(--mono);
-    letter-spacing: .08em;
-  }
-  .mechanism h3 {
-    margin: 0;
-    font: 750 19px/1 var(--display);
-    text-transform: uppercase;
-  }
-  .mechanism p { max-width: 34ch; margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; }
 
-  .empty-state {
-    padding: clamp(36px, 6vw, 82px) clamp(20px, 5vw, 72px);
-    background: var(--sheet-2);
-    border: 1px solid var(--rule-dark);
-  }
-  .empty-state h2 { max-width: 12ch; margin: 0; font: 800 clamp(38px, 5vw, 66px)/.9 var(--display); }
-  .empty-state > p { max-width: 60ch; margin: 14px 0 0; color: var(--ink-soft); }
-  .setup-steps {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    margin-top: 34px;
-    border-block: 1px solid var(--rule-dark);
-  }
-  .setup-steps article { padding: 20px 20px 24px 0; }
-  .setup-steps article + article { padding-left: 20px; border-left: 1px solid var(--rule-dark); }
-  .setup-steps strong { display: block; font: 750 20px/1 var(--display); text-transform: uppercase; }
-  .setup-steps p { margin: 8px 0 0; color: var(--ink-soft); font-size: 13px; }
-
-  .content-section { padding: 34px clamp(20px, 4vw, 56px) 48px; border-bottom: 1px solid var(--ink); }
-  .content-section + .content-section { padding-top: 48px; }
-  .section-copy { max-width: 68ch; margin: 8px 0 24px; color: var(--ink-soft); text-wrap: pretty; }
-  .text-link,
-  .link-button {
-    appearance: none;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--link);
-    cursor: pointer;
-    font-weight: 700;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-  .text-link:hover, .link-button:hover { color: #0e318c; }
-
-  .register-list { border-top: 1px solid var(--ink); }
+  .register-list { border-top: 1px solid var(--rule-dark); }
   .register-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 18px;
-    min-height: 62px;
-    padding: 10px 0;
+    gap: var(--s4);
+    min-height: 44px;
+    padding: 6px 0;
     border-bottom: 1px solid var(--rule);
   }
   button.register-row {
@@ -576,29 +381,27 @@
     border-inline: 0;
     border-top: 0;
     text-align: left;
-    transition: background 160ms ease-out;
+    transition: background 150ms ease-out;
   }
   button.register-row:hover { background: var(--sheet-2); }
-  button.register-row .row-main { transition: transform 180ms cubic-bezier(.16, 1, .3, 1); }
-  button.register-row:hover .row-main { transform: translateX(8px); }
   .row-main { min-width: 0; }
   .row-title {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 700 14px/1.3 var(--mono);
+    font: 700 13px/1.3 var(--mono);
   }
-  .row-detail { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12px; }
-  .row-value { font: 800 24px/1 var(--display); font-variant-numeric: tabular-nums; }
-  .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .row-detail { display: block; margin-top: 2px; color: var(--ink-soft); font-size: 12px; }
+  .row-value { font: 800 18px/1 var(--display); font-variant-numeric: tabular-nums; }
+  .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
   .dup-flag {
     display: inline-block;
     margin-left: 8px;
-    padding: 2px 6px;
+    padding: 2px 5px;
     border: 1px solid var(--healthy);
     color: var(--healthy);
-    font: 700 10px/1.4 var(--mono);
+    font: 700 10px/1.3 var(--mono);
     letter-spacing: .06em;
     text-transform: uppercase;
     white-space: nowrap;
@@ -607,146 +410,256 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 14px;
+    gap: var(--s3);
     flex-wrap: wrap;
-    margin: 0 0 14px;
-    padding: 12px 14px;
+    margin: 0 0 var(--s3);
+    padding: 8px 12px;
     border: 1px dashed var(--rule-dark);
     background-color: var(--sheet-2);
-    font-size: 13px;
     color: var(--ink-soft);
+    font-size: 12px;
   }
+
+  /* Proof grid: the photos themselves are the evidence; the image is the target. */
+  .proof-grid,
+  .library-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+  .proof { min-width: 0; margin: 0; background: var(--sheet); }
+  .proof-media {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    background: var(--sheet-2);
+  }
+  button.proof-media { cursor: pointer; }
+  .proof-media img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    transition: transform 240ms cubic-bezier(.16, 1, .3, 1);
+  }
+  button.proof-media:hover img { transform: scale(1.02); }
+  .media-placeholder {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 12px;
+    color: var(--ink-soft);
+    font: 700 11px/1.3 var(--mono);
+    letter-spacing: .08em;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .proof figcaption { padding: 8px 10px 10px; }
+  .file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 700 12px/1.3 var(--mono);
+  }
+  .file-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    margin-top: 3px;
+    color: var(--ink-soft);
+    font: 11px/1.4 var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .file-destination { color: var(--link); font-weight: 700; text-align: left; }
+
+  /* Protection copy folds away: read once, then out of the way. */
+  details.protection { border-bottom: 1px solid var(--rule-dark); }
+  details.protection > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s4);
+    min-height: 44px;
+    padding: 0 var(--gutter);
+    cursor: pointer;
+    list-style: none;
+    color: var(--ink-soft);
+    font: 750 13px/1 var(--display);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  details.protection > summary::-webkit-details-marker,
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.protection > summary::after,
+  details.advanced > summary::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin: -4px 4px 0 0;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 180ms ease-out;
+  }
+  details.protection[open] > summary::after,
+  details.advanced[open] > summary::after { transform: translateY(4px) rotate(-135deg); }
+  .protection-list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--s4) var(--s6);
+    padding: 0 var(--gutter) var(--s6);
+  }
+  .protection-list h3 { margin: 0; font: 750 14px/1.2 var(--display); text-transform: uppercase; }
+  .protection-list p { margin: 4px 0 0; color: var(--ink-soft); font-size: 12px; }
+
+  .empty-state {
+    padding: var(--s6);
+    background: var(--sheet-2);
+    border: 1px solid var(--rule-dark);
+  }
+  .empty-state h2 { margin: 0; font: 800 22px/1 var(--display); text-transform: uppercase; }
+  .empty-state > p { max-width: 64ch; margin: 8px 0 0; color: var(--ink-soft); font-size: 13px; }
+  .setup-steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s6);
+    margin-top: var(--s4);
+    padding-top: var(--s4);
+    border-top: 1px solid var(--rule-dark);
+  }
+  .setup-steps strong { display: block; font: 750 14px/1.2 var(--display); text-transform: uppercase; }
+  .setup-steps p { margin: 4px 0 0; color: var(--ink-soft); font-size: 12px; }
+
+  .text-link,
+  .link-button {
+    appearance: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--link);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .text-link:hover, .link-button:hover { color: #0e318c; }
 
   .button {
     appearance: none;
-    position: relative;
-    min-height: 42px;
-    padding: 11px 16px;
+    min-height: 32px;
+    padding: 6px 12px;
     border: 1px solid var(--ink);
     border-radius: 2px;
     background: var(--ink);
     color: var(--sheet);
     cursor: pointer;
-    font: 750 14px/1 var(--display);
-    letter-spacing: .025em;
+    font: 750 12px/1 var(--display);
+    letter-spacing: .05em;
     text-transform: uppercase;
-    transition: transform 160ms ease-out, background 160ms ease-out, color 160ms ease-out;
+    transition: background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
   }
-  .button:hover { background: var(--signal); border-color: var(--signal); }
+  .button:hover { background: var(--signal-fill); border-color: var(--signal-fill); }
   .button:active { transform: translateY(1px); }
   .button.secondary { background: transparent; color: var(--ink); }
   .button.secondary:hover { background: var(--sheet-2); border-color: var(--ink); }
   .button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
   .button.danger:hover { background: var(--danger); color: #fff; }
-  .button.quiet { min-height: 36px; padding: 8px 10px; border-color: transparent; background: transparent; color: var(--link); }
+  .button.quiet { padding: 6px 8px; border-color: transparent; background: transparent; color: var(--link); }
   .button.quiet:hover { background: var(--sheet-2); border-color: var(--rule-dark); color: var(--ink); }
   .button:disabled { cursor: wait; opacity: .48; }
 
   .notice {
-    margin-bottom: 24px;
-    padding: 16px 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    margin-bottom: var(--s3);
+    padding: 10px 12px;
     border: 1px solid var(--warning);
     background: #f4e3cc;
     color: #502700;
+    font-size: 13px;
   }
   .notice.danger { border-color: var(--danger); background: #f1d8d1; color: #54251f; }
-  .notice strong { display: block; }
-  .notice p { margin: 4px 0 0; }
+  .notice p { margin: 0; }
 
-  .issue-block {
-    display: grid;
-    grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
-    border-top: 1px solid var(--ink);
-  }
-  .issue-heading { padding: 22px 24px 28px 0; }
-  .issue-heading h2 { margin: 0; font: 800 30px/1 var(--display); text-transform: uppercase; }
-  .issue-heading p { margin: 8px 0 0; color: var(--ink-soft); font-size: 13px; }
-  .issue-content { min-width: 0; padding: 12px 0 34px 24px; border-left: 1px solid var(--rule-dark); }
   .issue-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 18px;
-    padding: 14px 0;
+    gap: var(--s4);
+    padding: 8px 0;
     border-bottom: 1px solid var(--rule);
   }
-  .decision-row { grid-template-columns: 108px minmax(0, 1fr); align-items: start; }
-  .decision-thumb { width: 108px; aspect-ratio: 4/3; object-fit: cover; background: var(--sheet-2); }
-  .decision-options { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .decision-row { grid-template-columns: 96px minmax(0, 1fr); align-items: start; }
+  .decision-thumb { width: 96px; aspect-ratio: 4 / 3; object-fit: cover; background: var(--sheet-2); }
+  .decision-options { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
-  .automation-group {
-    display: grid;
-    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-    border-top: 1px solid var(--ink);
-  }
-  .automation-intro { padding: 24px 28px 30px 0; }
-  .automation-intro h2 { margin: 0; font: 800 30px/1 var(--display); text-transform: uppercase; }
-  .automation-intro p { margin: 10px 0 0; color: var(--ink-soft); font-size: 13px; }
-  .automation-list { border-left: 1px solid var(--rule-dark); }
-  .automation-panel { padding: 24px 0 30px 24px; }
   .switch-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 18px;
+    gap: var(--s4);
     align-items: center;
-    min-height: 86px;
-    padding: 16px 0 16px 24px;
+    min-height: 52px;
+    padding: 6px 0;
     border-bottom: 1px solid var(--rule);
   }
-  .switch-row strong { display: block; font-size: 15px; }
-  .switch-row p { max-width: 66ch; margin: 5px 0 0; color: var(--ink-soft); font-size: 13px; }
+  .switch-row strong { display: block; font-size: 14px; }
+  .switch-row p { max-width: 70ch; margin: 2px 0 0; color: var(--ink-soft); font-size: 12px; }
   .switch {
     appearance: none;
     position: relative;
-    width: 76px;
-    height: 38px;
+    width: 48px;
+    height: 44px;
     flex: none;
-    border: 1px solid var(--ink);
-    border-radius: 0;
-    background: var(--sheet-2);
+    padding: 0;
+    border: 0;
+    background: none;
     cursor: pointer;
-    transition: background 160ms ease-out;
   }
   .switch::before {
-    content: "OFF";
+    content: "";
     position: absolute;
-    top: 13px;
-    right: 9px;
-    color: var(--ink-soft);
-    font: 700 9px/1 var(--mono);
+    left: 0;
+    right: 0;
+    top: 9px;
+    height: 26px;
+    border: 1px solid var(--ink);
+    background: var(--sheet-2);
+    transition: background 150ms ease-out, border-color 150ms ease-out;
   }
   .switch::after {
     content: "";
     position: absolute;
-    width: 28px;
-    height: 28px;
     left: 4px;
-    top: 4px;
+    top: 13px;
+    width: 18px;
+    height: 18px;
     background: var(--ink);
-    transition: transform 180ms cubic-bezier(.16, 1, .3, 1), background 160ms ease-out;
+    transition: transform 180ms cubic-bezier(.16, 1, .3, 1), background 150ms ease-out;
   }
-  .switch[aria-checked="true"] { background: #f4d3cc; border-color: var(--signal); }
-  .switch[aria-checked="true"]::before { content: "ON"; left: 10px; right: auto; color: var(--signal-dark); }
-  .switch[aria-checked="true"]::after { transform: translateX(38px); background: var(--signal); }
+  .switch[aria-checked="true"]::before { background: #f4d3cc; border-color: var(--signal); }
+  .switch[aria-checked="true"]::after { transform: translateX(22px); background: var(--signal); }
+  .switch:disabled { cursor: wait; opacity: .5; }
 
-  .inline-form { display: flex; align-items: flex-end; gap: 10px; margin-top: 18px; }
+  .inline-form { display: flex; align-items: flex-end; gap: var(--s2); margin-top: var(--s3); }
   .field { min-width: 0; }
   .field.grow { flex: 1; }
-  label, .field-label {
-    display: block;
-    margin-bottom: 7px;
-    color: var(--ink-soft);
-    font: 700 10px/1.2 var(--mono);
-    letter-spacing: .07em;
-    text-transform: uppercase;
-  }
+  label, .field-label { display: block; margin-bottom: 4px; letter-spacing: .07em; }
   input[type="text"],
   input[type="search"],
   input[type="number"],
   select {
     width: 100%;
-    min-height: 44px;
-    padding: 10px 12px;
+    min-height: 36px;
+    padding: 6px 10px;
     border: 1px solid var(--rule-dark);
     border-radius: 2px;
     background: var(--sheet);
@@ -756,86 +669,83 @@
   input::placeholder { color: var(--ink-faint); opacity: 1; }
   input:focus, select:focus { border-color: var(--focus); outline: 3px solid color-mix(in srgb, var(--focus) 25%, transparent); }
 
-  details.advanced { margin-top: 34px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+  details.advanced { margin-top: var(--s4); border-top: 1px solid var(--rule-dark); }
   details.advanced > summary {
-    min-height: 66px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--s4);
     cursor: pointer;
     list-style: none;
-    font: 800 27px/1 var(--display);
+    font: 750 16px/1 var(--display);
+    letter-spacing: .03em;
     text-transform: uppercase;
   }
-  details.advanced > summary::-webkit-details-marker { display: none; }
-  details.advanced > summary::after { content: "+"; font: 500 28px/1 var(--mono); }
-  details.advanced[open] > summary::after { content: "−"; }
-  .advanced-body { padding: 0 0 34px; }
+  .advanced-body { padding: 0 0 var(--s4); }
 
   .rule-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 16px;
-    padding: 14px 0;
+    gap: var(--s3);
+    padding: 8px 0;
     border-bottom: 1px solid var(--rule);
   }
-  .rule-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font: 12px/1.45 var(--mono); }
+  .rule-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font: 12px/1.45 var(--mono); }
   .rule-muted { color: var(--ink-soft); }
   .rule-arrow { color: var(--signal); font-weight: 800; }
   .rule-form {
     display: grid;
     grid-template-columns: 180px minmax(0, 1fr);
-    gap: 14px 20px;
+    gap: 10px 16px;
     align-items: start;
-    margin-top: 20px;
-    padding: 22px;
+    margin-top: var(--s3);
+    padding: var(--s4);
     background: var(--sheet-2);
     border: 1px solid var(--rule-dark);
   }
-  .rule-form .field-label { margin-top: 14px; }
+  .rule-form .field-label { margin-top: 8px; }
   .rule-form .field-label:first-child { margin-top: 0; }
-  .field-help { display: block; margin-top: 5px; color: var(--ink-faint); font: 11px/1.35 var(--sans); text-transform: none; letter-spacing: 0; }
-  .form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; padding-top: 6px; }
+  .field-help { display: block; margin-top: 3px; color: var(--ink-faint); font: 11px/1.35 var(--sans); text-transform: none; letter-spacing: 0; }
+  .form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 6px; padding-top: 4px; }
   .picker {
-    min-height: 44px;
+    min-height: 36px;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
-    padding: 6px;
+    padding: 4px;
     border: 1px solid var(--rule-dark);
     background: var(--sheet);
   }
-  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--rule-dark); font: 11px/1 var(--mono); }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid var(--rule-dark); font: 11px/1 var(--mono); }
   .chip button { appearance: none; padding: 0; border: 0; background: none; color: var(--danger); cursor: pointer; font-weight: 800; }
-  .picker select { width: auto; min-height: 30px; padding: 4px 28px 4px 7px; border-style: dashed; font-size: 11px; }
-  .picker input { width: min(210px, 100%); min-height: 32px; padding: 5px 7px; }
-  .probe-result { min-height: 22px; margin-top: 10px; color: var(--ink-soft); font: 12px/1.4 var(--mono); }
+  .picker select { width: auto; min-height: 28px; padding: 3px 28px 3px 7px; border-style: dashed; font-size: 11px; }
+  .picker input { width: min(210px, 100%); min-height: 28px; padding: 4px 7px; }
+  .probe-result { min-height: 20px; margin-top: 8px; color: var(--ink-soft); font: 12px/1.4 var(--mono); }
 
   .skeleton {
-    min-height: calc(100dvh - 74px);
     display: grid;
     align-content: start;
-    gap: 18px;
-    padding: clamp(34px, 6vw, 78px) clamp(20px, 5vw, 66px);
+    gap: var(--s3);
+    padding: var(--s6) var(--gutter);
   }
-  .skeleton-line { height: 18px; max-width: 520px; background: var(--sheet-2); animation: skeleton 1.2s ease-in-out infinite alternate; }
-  .skeleton-line.title { width: min(720px, 80%); height: 72px; }
-  .skeleton-block { height: 240px; margin-top: 24px; border: 1px solid var(--rule); background: var(--paper); animation: skeleton 1.2s ease-in-out infinite alternate; }
-  .route-error { min-height: calc(100dvh - 74px); display: grid; place-items: center; padding: 40px 20px; }
-  .route-error > div { width: min(520px, 100%); padding: 30px; border: 1px solid var(--danger); background: #f1d8d1; }
-  .route-error h1 { margin: 0; font: 800 42px/1 var(--display); }
-  .route-error p { margin: 12px 0 22px; color: #54251f; }
+  .skeleton-line { height: 14px; max-width: 480px; background: var(--sheet-2); animation: skeleton 1.2s ease-in-out infinite alternate; }
+  .skeleton-line.title { width: min(420px, 70%); height: 26px; }
+  .skeleton-block { height: 200px; margin-top: var(--s3); border: 1px solid var(--rule); background: var(--paper); animation: skeleton 1.2s ease-in-out infinite alternate; }
+  .route-error { min-height: calc(100dvh - var(--header-h) - 1px); display: grid; place-items: center; padding: 40px 20px; }
+  .route-error > div { width: min(520px, 100%); padding: var(--s6); border: 1px solid var(--danger); background: #f1d8d1; }
+  .route-error h1 { margin: 0; font: 800 26px/1 var(--display); text-transform: uppercase; }
+  .route-error p { margin: 10px 0 18px; color: #54251f; }
 
   #toast {
     position: fixed;
     z-index: 60;
-    right: 20px;
-    bottom: 20px;
-    width: min(420px, calc(100vw - 40px));
-    padding: 13px 16px;
+    right: 16px;
+    bottom: 16px;
+    width: min(420px, calc(100vw - 32px));
+    padding: 11px 14px;
     border: 1px solid var(--ink);
     background: var(--ink);
     color: var(--sheet);
@@ -859,151 +769,81 @@
     border: 0 !important;
   }
 
-  @keyframes intake-line {
-    0% { clip-path: inset(0 100% 0 0); opacity: .4; }
-    55%, 100% { clip-path: inset(0 0 0 0); opacity: 1; }
-  }
   @keyframes breathe { 50% { transform: scale(.72); opacity: .55; } }
-  @keyframes page-in { from { opacity: .001; clip-path: inset(0 0 18px 0); } to { opacity: 1; clip-path: inset(0); } }
   @keyframes skeleton { to { opacity: .52; } }
 
   @media (max-width: 1099px) {
-    .header-inner {
-      grid-template-columns: auto 1fr auto;
-      grid-template-rows: 72px;
-      grid-template-areas: "brand nav state";
-      min-height: 72px;
-    }
-    .brand { min-width: 170px; }
-    .brand-mark { display: block; }
-    .brand-name { white-space: normal; font-size: 25px; }
-    .brand-name span { display: block; }
-    .brand-name span + span::before { content: none; }
-    .primary-nav a { min-width: 96px; padding-inline: 12px; }
-    .header-state {
-      min-width: 0;
-      min-height: 72px;
-      justify-self: end;
-      justify-content: flex-end;
-      border-top: 0;
-    }
+    .brand-name { font-size: 20px; }
+    .primary-nav a { padding-inline: 14px; }
     .header-state-copy span { display: none; }
-    main { min-height: calc(100dvh - 73px); }
-    .verdict-band { grid-template-columns: 1fr; }
-    .verdict-facts { border-left: 0; border-top: 1px solid var(--ink); }
-    .proof-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .now-grid { grid-template-columns: 240px minmax(0, 1fr); }
-    .mechanism { grid-template-columns: 1fr 1fr; }
-    .mechanism-heading { grid-column: 1 / -1; border-bottom: 1px solid var(--rule-dark); }
-    .mechanism article:nth-of-type(odd) { border-left: 0; }
-    .mechanism article:nth-of-type(n + 3) { border-top: 1px solid var(--rule-dark); }
+    .status-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .status-strip > :first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--rule-dark); }
+    .status-strip > :nth-child(2) { border-left: 0; }
+    .proof-grid, .library-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .protection-list { grid-template-columns: 1fr 1fr; }
   }
 
   @media (max-width: 760px) {
-    body { padding-bottom: 72px; }
-    .app-header { position: sticky; }
-    .header-inner {
-      min-height: 62px;
-      grid-template-columns: 1fr auto;
-      grid-template-rows: 62px;
-      grid-template-areas: "brand state";
-    }
-    .brand { min-width: 0; padding: 10px 16px; border-right: 0; }
-    .brand-mark { width: 24px; height: 24px; }
-    .brand-mark::before { top: 10px; }
-    .brand-mark::after { inset: 6px; }
-    .brand-name { font-size: 21px; }
+    :root { --header-h: 52px; }
+    body { padding-bottom: 60px; }
+    .brand { padding-inline: var(--s4); border-right: 0; }
+    .brand-name { font-size: 20px; }
     .primary-nav {
-      grid-area: auto;
       position: fixed;
       z-index: 40;
       left: 0;
       right: 0;
       bottom: 0;
-      height: 68px;
+      height: 60px;
       background: var(--sheet);
       border-top: 1px solid var(--ink);
     }
-    .primary-nav a,
-    .primary-nav a:first-child {
+    .primary-nav a {
       min-width: 0;
-      min-height: 68px;
       flex: 1;
-      padding: 0 5px;
-      border-left: 0;
-      border-right: 1px solid var(--rule-dark);
+      justify-content: center;
+      padding: 0 4px;
       font-size: 13px;
     }
     .primary-nav a:last-child { border-right: 0; }
-    .primary-nav a[aria-current="page"]::after { border-width: 10px 0 0 10px; }
-    .header-state { min-width: 0; min-height: 62px; padding: 10px 16px; }
-    .header-state-copy strong { font-size: 11px; }
-    .header-state-copy span { display: none; }
-    main { min-height: calc(100dvh - 130px); border-inline: 0; }
-    .page-head { grid-template-columns: 1fr; padding-top: 34px; }
-    .page-head h1, .verdict-title { font-size: clamp(48px, 15vw, 72px); }
-    .page-meta { width: 100%; }
-    .verdict-copy { padding-top: 38px; }
-    .verdict-facts { grid-template-columns: 1fr 1fr; }
-    .verdict-facts > div { padding: 20px; }
-    .fact-value { font-size: 32px; }
-    .fact-detail { font-size: 10px; }
-    .intake { overflow: hidden; }
-    .intake-title-row { align-items: flex-start; flex-direction: column; gap: 7px; }
-    .intake-track { margin-inline: -8px; }
-    .stage-name { font-size: 13px; }
-    .stage-value { font-size: 11px; }
-    .stage-detail { display: none; }
-    .now-grid { grid-template-columns: 1fr; }
-    .attention-register { border-right: 0; border-bottom: 1px solid var(--ink); }
-    .attention-register.is-clear { display: none; }
-    .proof-grid, .library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .proof figcaption { padding: 11px; }
+    .header-state { padding-inline: var(--s4); }
+    main { min-height: calc(100dvh - var(--header-h) - 61px); border-inline: 0; }
+    .page-head { padding: var(--s4) var(--s4) var(--s3); }
+    .status-strip { grid-template-columns: 1fr 1fr; }
+    .status-strip > * { padding: var(--s3) var(--s4); }
+    .status-strip > :nth-child(2n) { border-left: 0; }
+    .status-strip > :nth-child(n + 4) { border-top: 1px solid var(--rule-dark); }
+    .verdict h1 { font-size: 24px; }
+    .fact-value { font-size: 20px; }
+    .section { padding: var(--s3) var(--s4) var(--s4); }
+    .proof-grid, .library-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .proof figcaption { padding: 6px 8px 8px; }
     .file-name { font-size: 11px; }
     .file-meta { font-size: 10px; }
-    .file-destination { display: inline-flex; align-items: center; min-height: 44px; margin-top: 2px; }
-    .mechanism { grid-template-columns: 1fr; }
-    .mechanism-heading { grid-column: 1; }
-    .mechanism article,
-    .mechanism article:nth-of-type(odd),
-    .mechanism article:nth-of-type(n + 3) { border-left: 0; border-top: 1px solid var(--rule-dark); }
-    .setup-steps { grid-template-columns: 1fr; }
-    .setup-steps article + article { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule-dark); }
-    .issue-block, .automation-group { grid-template-columns: 1fr; }
-    .issue-heading, .automation-intro { padding-right: 0; }
-    .issue-content, .automation-list { padding-left: 0; border-left: 0; }
-    .automation-panel { padding-left: 0; }
-    .switch-row { padding-left: 0; }
-    .decision-row { grid-template-columns: 80px minmax(0, 1fr); }
-    .decision-thumb { width: 80px; }
-    .rule-form { grid-template-columns: 1fr; padding: 16px; }
-    .rule-form .field-label { margin-top: 0; margin-bottom: -8px; }
+    details.protection > summary { padding-inline: var(--s4); }
+    .protection-list { grid-template-columns: 1fr; padding-inline: var(--s4); }
+    .setup-steps { grid-template-columns: 1fr; gap: var(--s4); }
+    .decision-row { grid-template-columns: 72px minmax(0, 1fr); }
+    .decision-thumb { width: 72px; }
+    .rule-form { grid-template-columns: 1fr; padding: var(--s3); }
+    .rule-form .field-label { margin-top: 0; margin-bottom: -6px; }
     .form-actions { grid-column: 1; }
     .inline-form { align-items: stretch; flex-direction: column; }
     .button { min-height: 44px; }
-    .button.quiet { min-width: 44px; min-height: 44px; }
-    .switch { height: 44px; }
-    .switch::before { top: 16px; }
-    .switch::after { width: 34px; height: 34px; }
-    .switch[aria-checked="true"]::after { transform: translateX(34px); }
-    .picker select,
-    .picker input { min-height: 44px; padding-block: 10px; }
+    .button.quiet { min-width: 44px; }
+    input[type="text"], input[type="search"], input[type="number"], select { min-height: 44px; }
+    .picker select, .picker input { min-height: 40px; }
     .chip { gap: 6px; padding: 0 0 0 8px; }
-    .chip button { display: grid; place-items: center; min-width: 44px; min-height: 44px; }
-    .text-link { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
-    #toast { bottom: 86px; }
+    .chip button { display: grid; place-items: center; min-width: 40px; min-height: 40px; }
+    .text-link { display: inline-flex; align-items: center; min-height: 44px; }
+    #toast { bottom: 76px; }
   }
 
   @media (max-width: 440px) {
     .header-state-copy { display: none; }
     .primary-nav a { font-size: 11px; }
-    .nav-count { position: absolute; top: 8px; right: 8px; }
-    .verdict-facts { grid-template-columns: 1fr; }
-    .verdict-facts > div + div { border-left: 0; border-top: 1px solid var(--rule-dark); }
-    .proof-grid, .library-grid { grid-template-columns: 1fr 1fr; }
-    .stage-name { font-size: 11px; }
-    .stage-value { font-size: 10px; }
-    .issue-row, .register-row, .rule-row { grid-template-columns: 1fr; align-items: start; }
+    .nav-count { position: absolute; top: 6px; right: 6px; }
+    .issue-row, .rule-row { grid-template-columns: 1fr; align-items: start; }
     .row-actions { justify-content: flex-start; }
   }
 
@@ -1018,7 +858,7 @@
 THESIS: A five-second confidence instrument for irreplaceable files, refusing both the black camera-body dashboard and rounded cloud-storage SaaS.
 OWN-WORLD: Cool archival paper, near-black register ink, ruled accession sheets, clipped index tabs, tabular metadata, and one vermilion intake thread.
 STORY: The operator sees whether files are arriving, understands the wait-check-file mechanism, resolves exceptions, then browses or tunes the workflow.
-FIRST VIEWPORT: A horizontal index frames an oversized truthful verdict; the intake rail crosses the fold, real recent photos dominate below, and one condition report holds every urgent item.
+FIRST VIEWPORT: A 56px index bar, then a status strip that answers the five questions in one row, anything that needs a decision, and real recent photos six across; the protection copy folds away after the first read.
 FORM: Contemporary archive accession ledger, fourth grounded direction, seed 09d695ef; composition approved from .impeccable/mocks/archive-manifest-c.png.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 -->
@@ -1170,10 +1010,19 @@ async function refreshChrome() {
   }
 }
 
+let skeletonTimer = null;
 function loadingPage() {
   view.innerHTML = `<div class="skeleton" aria-label="Loading">
     <div class="skeleton-line title"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
     <div class="skeleton-block"></div></div>`;
+}
+
+// Doherty threshold: LAN fetches usually land well under 200 ms. The skeleton
+// only appears when a fetch is actually slow, so a tab switch feels immediate.
+function deferSkeleton() {
+  clearTimeout(skeletonTimer);
+  skeletonTimer = setTimeout(loadingPage, 200);
+  return () => clearTimeout(skeletonTimer);
 }
 
 function routeError(error) {
@@ -1184,8 +1033,12 @@ function routeError(error) {
   </div></section>`;
 }
 
-function pageHead(title, copy, meta = "") {
-  return `<header class="page-head"><div><h1>${esc(title)}</h1><p>${copy}</p></div>${meta}</header>`;
+function pageHead(title, meta = "", copy = "", actions = "") {
+  return `<header class="page-head"><h1>${esc(title)}</h1>${meta ? `<p class="page-meta">${meta}</p>` : ""}${actions ? `<div class="page-actions">${actions}</div>` : ""}${copy ? `<p class="page-copy">${copy}</p>` : ""}</header>`;
+}
+
+function sectionBlock(id, title, note, body, className = "") {
+  return `<section class="section ${className}" aria-labelledby="${id}"><div class="section-head"><h2 id="${id}">${esc(title)}</h2>${note ? `<span class="section-note">${note}</span>` : ""}</div>${body}</section>`;
 }
 
 function firstRun() {
@@ -1209,32 +1062,39 @@ function proofCard(file, options = {}) {
   const preview = canPreview(file.name)
     ? `<img class="preview-image" loading="lazy" src="/api/thumb?v=${THUMB_V}&amp;f=${encodeURIComponent(file.rel)}" alt="Preview of ${esc(file.name)}" data-placeholder="No preview">`
     : `<div class="media-placeholder">${esc((file.type || "file").toUpperCase())}</div>`;
-  const destination = options.destination === false ? "" : `<button class="link-button file-destination" type="button" data-day="${esc(file.date)}">Filed ${esc(file.date)} / ${esc(file.type)}</button>`;
-  return `<figure class="proof"><div class="proof-media">${preview}</div><figcaption>
+  const openDay = options.destination !== false;
+  const media = openDay
+    ? `<button class="proof-media" type="button" data-day="${esc(file.date)}" aria-label="Open ${esc(file.date)} / ${esc(file.type)} in the library">${preview}</button>`
+    : `<div class="proof-media">${preview}</div>`;
+  const destination = openDay ? `<button class="link-button file-destination" type="button" data-day="${esc(file.date)}">${esc(file.date)}</button>` : "";
+  return `<figure class="proof">${media}<figcaption>
     <div class="file-name" title="${esc(file.name)}">${esc(file.name)}</div>
-    <div class="file-meta"><span>${esc((file.type || "file").toUpperCase())}</span><span>${hm(file.mtime)}</span></div>
-    ${destination}
+    <div class="file-meta"><span>${esc((file.type || "file").toUpperCase())}</span><span>${hm(file.mtime)}</span>${destination}</div>
   </figcaption></figure>`;
 }
 
-function attentionRegister(status, quarantineFiles) {
+function attentionBlock(status, quarantineFiles) {
   const quarantine = activeQuarantine(quarantineFiles);
   const decisions = status.counts.pending_decisions;
   const items = [];
-  if (status.health.state === "fail") items.push(`<div class="attention-item"><strong>Pipeline alert</strong><p>${esc(status.health.detail || "The health check reported a problem.")}</p></div>`);
-  if (quarantine.length) items.push(`<div class="attention-item"><strong>${quarantine.length} ${plural(quarantine.length, "file")} held</strong><p>Held files stay recoverable until you retry or stage them for deletion.</p></div>`);
-  if (decisions) items.push(`<div class="attention-item"><strong>${decisions} lens ${plural(decisions, "decision")}</strong><p>Unanswered questions leave the original metadata unchanged.</p></div>`);
-  return `<aside class="attention-register ${items.length ? "has-issues" : "is-clear"}" aria-labelledby="attention-title">
-    <h2 id="attention-title">Attention</h2>
-    ${items.length ? items.join("") + '<a class="text-link" href="#attention">Review attention</a>' : '<p class="attention-clear"><strong>Nothing needs you.</strong><br>Held files and metadata questions will appear here.</p>'}
-  </aside>`;
+  if (status.health.state === "fail") items.push(["Pipeline alert", status.health.detail || "The health check reported a problem."]);
+  if (quarantine.length) items.push([`${quarantine.length} ${plural(quarantine.length, "file")} held`, "Retry validation or stage for deletion. Nothing is deleted automatically."]);
+  if (decisions) items.push([`${decisions} lens ${plural(decisions, "decision")}`, "Answer, or leave the metadata unchanged."]);
+  if (!items.length) return "";
+  const rows = items.map(([title, detail]) => `<a class="attention-row" href="#attention"><span class="row-main"><strong>${esc(title)}</strong><span class="row-detail">${esc(detail)}</span></span><span class="chevron" aria-hidden="true"></span></a>`).join("");
+  return sectionBlock("attention-title", "Needs attention", "", `<div class="attention-list">${rows}</div>`, "attention-block");
 }
 
 async function renderNow({ loading = true } = {}) {
-  if (loading) loadingPage();
-  const [status, recent, quarantine] = await Promise.all([
-    api("/api/status"), api("/api/recent?limit=12"), api("/api/quarantine"),
-  ]);
+  const settle = loading ? deferSkeleton() : () => {};
+  let status, recent, quarantine;
+  try {
+    [status, recent, quarantine] = await Promise.all([
+      api("/api/status"), api("/api/recent?limit=12"), api("/api/quarantine"),
+    ]);
+  } finally {
+    settle();
+  }
   if (tab !== "now") return;
   updateChrome(status, quarantine.files);
 
@@ -1242,64 +1102,70 @@ async function renderNow({ loading = true } = {}) {
   const quarantineOpen = activeQuarantine(quarantine.files).length;
   const issueCount = quarantineOpen + status.counts.pending_decisions + (status.health.state === "fail" ? 1 : 0);
   let title = "Ready for your next upload";
-  let sub = "Your camera sends. This box waits, checks the file structure, and files accepted media by capture date.";
+  let sub = "Nothing in intake. Nothing held.";
+  let verdictClass = "";
   if (status.health.state === "fail") {
     title = "The pipeline needs attention";
-    sub = "Your files stay in place while you review the reported problem. No held file is deleted automatically.";
+    sub = "Files stay in place. Review the health report below.";
+    verdictClass = "is-attention";
   } else if (inbound > 0) {
     title = `${inbound} ${plural(inbound, "file")} ${inbound === 1 ? "is" : "are"} arriving`;
-    sub = "Leave the camera connected. New files remain in intake until writes settle and structural checks finish.";
+    sub = "Leave the camera connected until intake clears.";
   } else if (issueCount > 0) {
-    title = `${issueCount} ${plural(issueCount, "item")} need attention`;
-    sub = "Accepted files are already in the library. Review held transfers or optional lens metadata questions when you’re ready.";
+    title = `${issueCount} ${plural(issueCount, "item")} ${issueCount === 1 ? "needs" : "need"} attention`;
+    sub = "Accepted files are already filed. Review the held items below.";
+    verdictClass = "is-attention";
   }
 
   const freePercent = status.disk.total ? Math.round(status.disk.free / status.disk.total * 100) : 0;
-  const healthClass = status.health.state === "fail" ? "status-bad" : "status-good";
-  const healthValue = status.health.state === "fail" ? "Attention" : "Monitoring";
+  const healthBad = status.health.state === "fail";
+  const healthDetail = status.health.detail || "No failures reported";
   const recentFiles = recent.files.slice(0, 12);
   const recentMarkup = recentFiles.length
     ? `<div class="proof-grid">${recentFiles.map(file => proofCard(file)).join("")}</div>`
     : firstRun();
+  const intakeRows = status.incoming.length
+    ? `<div class="register-list">${status.incoming.map(file => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(file.name)}</div><div class="row-detail">Waiting or checking · arrived ${age(file.age_s)} ago</div></div><span class="row-value">${bytes(file.size)}</span></div>`).join("")}</div>`
+    : '<p class="section-copy">Files still being written appear here once the camera finishes each transfer.</p>';
+  const intake = inbound
+    ? sectionBlock("intake-title", "In intake", `${status.receiving} still writing · ${status.incoming.length} waiting or checking`, intakeRows)
+    : "";
+  const protectionOpen = $("#protection")?.open ? " open" : "";
 
-  view.innerHTML = `<div class="page ${loading ? "" : "no-animation"}">
-    <section class="verdict-band" aria-labelledby="now-verdict">
-      <div class="verdict-copy"><h1 class="verdict-title" id="now-verdict">${esc(title)}</h1><p class="verdict-sub">${esc(sub)}</p></div>
-      <dl class="verdict-facts">
-        <div><dt class="fact-label">Pipeline evidence</dt><dd class="fact-value ${healthClass}">${healthValue}</dd><span class="fact-detail">${esc(status.health.detail || "No failures reported")}</span></div>
-        <div><dt class="fact-label">Storage available</dt><dd class="fact-value">${bytes(status.disk.free)}</dd><span class="fact-detail">${freePercent}% of ${bytes(status.disk.total)} available</span></div>
-      </dl>
+  view.innerHTML = `<div class="page">
+    <section class="status-strip" aria-labelledby="now-verdict">
+      <div class="verdict ${verdictClass}"><h1 id="now-verdict">${esc(title)}</h1><p>${esc(sub)}</p></div>
+      <div class="fact"><span class="fact-label">Pipeline</span><strong class="fact-value ${healthBad ? "status-bad" : "status-good"}">${healthBad ? "Attention" : "Monitoring"}</strong><span class="fact-detail" title="${esc(healthDetail)}">${esc(healthDetail)}</span></div>
+      <div class="fact"><span class="fact-label">In intake</span><strong class="fact-value">${inbound}</strong><span class="fact-detail">${status.receiving} receiving · ${status.incoming.length} checking</span></div>
+      <div class="fact"><span class="fact-label">Filed today</span><strong class="fact-value">${status.counts.sorted_today}</strong><span class="fact-detail">by capture date, not arrival</span></div>
+      <div class="fact"><span class="fact-label">Free space</span><strong class="fact-value">${bytes(status.disk.free)}</strong><span class="fact-detail">${freePercent}% of ${bytes(status.disk.total)}</span></div>
     </section>
-    <section class="intake" aria-labelledby="intake-title">
-      <div class="intake-title-row"><h2 class="section-title" id="intake-title">How intake stands now</h2><span class="intake-note">Activity line shows aggregate intake, not per-file progress.</span></div>
-      <div class="intake-track ${inbound ? "active" : ""}">
-        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Camera</span><span class="stage-value">Wi-Fi FTP</span><span class="stage-detail">Native camera transfer</span></div>
-        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Receiving</span><span class="stage-value">${status.receiving} ${plural(status.receiving, "file")}</span><span class="stage-detail">Still writing to intake</span></div>
-        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Waiting / checking</span><span class="stage-value">${status.incoming.length} ${plural(status.incoming.length, "file")}</span><span class="stage-detail">Settling or being validated</span></div>
-        <div class="stage"><span class="stage-node" aria-hidden="true"></span><span class="stage-name">Filed by date</span><span class="stage-value">${status.counts.sorted_today} dated today</span><span class="stage-detail">Capture date, not arrival time</span></div>
+    ${intake}
+    ${attentionBlock(status, quarantine.files)}
+    ${sectionBlock("recent-title", "Recently accepted", recent.files.length ? '<a class="text-link" href="#library">Open library</a>' : "", recentMarkup)}
+    <details class="protection" id="protection"${protectionOpen}>
+      <summary>How files are protected</summary>
+      <div class="protection-list">
+        <div><h3>Waits for stability</h3><p>Fresh uploads must stop changing before the sorter moves on.</p></div>
+        <div><h3>Checks file structure</h3><p>RAW, image, HEIF, and video payloads get format-specific integrity checks.</p></div>
+        <div><h3>Never overwrites</h3><p>Name collisions create a suffixed copy. The existing file stays untouched.</p></div>
+        <div><h3>Files by capture date</h3><p>Accepted media lands under its recorded photo date and file type.</p></div>
       </div>
-      ${inbound ? `<div class="register-list" aria-label="Files currently in intake">${status.incoming.map(file => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(file.name)}</div><div class="row-detail">Waiting or checking · arrived ${age(file.age_s)} ago</div></div><span class="row-value">${bytes(file.size)}</span></div>`).join("")}</div>` : ""}
-    </section>
-    <section class="now-grid">
-      ${attentionRegister(status, quarantine.files)}
-      <div class="recent"><div class="section-title-row"><h2>Recently accepted</h2>${recent.files.length ? '<a class="text-link" href="#library">Open library</a>' : ""}</div>${recentMarkup}</div>
-    </section>
-    <section class="mechanism" aria-labelledby="protection-title">
-      <header class="mechanism-heading" id="protection-title">Protection by design</header>
-      <article><h3>Waits for stability</h3><p>Fresh uploads must stop changing before the sorter moves on.</p></article>
-      <article><h3>Checks file structure</h3><p>RAW, image, HEIF, and video payloads get format-specific integrity checks.</p></article>
-      <article><h3>Never overwrites</h3><p>Name collisions create a suffixed copy. The existing file stays untouched.</p></article>
-      <article><h3>Files by capture date</h3><p>Accepted media lands under its recorded photo date and file type.</p></article>
-    </section>
+    </details>
   </div>`;
 }
 
 async function renderLibrary() {
-  loadingPage();
-  const library = await api("/api/library");
+  const settle = deferSkeleton();
+  let library;
+  try {
+    library = await api("/api/library");
+  } finally {
+    settle();
+  }
   if (tab !== "library") return;
   const fileTotal = library.days.reduce((sum, day) => sum + day.total, 0);
-  const meta = `<dl class="page-meta"><div><dt>Capture dates</dt><dd>${library.days.length}</dd></div><div><dt>Files indexed</dt><dd>${fileTotal}</dd></div></dl>`;
+  const meta = `${library.days.length} capture ${plural(library.days.length, "date")} · ${fileTotal} ${plural(fileTotal, "file")} · newest first`;
   const body = library.days.length
     ? `<div class="register-list">${library.days.map(day => {
         const types = Object.entries(day.types).map(([type, count]) => `${esc(type)} ${count}`).join(" · ") || "No supported files";
@@ -1309,21 +1175,26 @@ async function renderLibrary() {
         </button>`;
       }).join("")}</div>`
     : firstRun();
-  view.innerHTML = `<div class="page">${pageHead("Library", "Accepted files grouped by the date recorded by the camera—not the day they happened to arrive.", meta)}
-    <section class="content-section"><div class="section-title-row"><h2>Capture dates</h2><span class="intake-note">Newest first</span></div>${body}</section>
+  view.innerHTML = `<div class="page">${pageHead("Library", meta, "Grouped by the capture date the camera recorded, not the day of arrival.")}
+    <section class="section">${body}</section>
   </div>`;
 }
 
 async function renderDay(date) {
-  loadingPage();
-  const day = await api(`/api/library/${encodeURIComponent(date)}`);
+  const settle = deferSkeleton();
+  let day;
+  try {
+    day = await api(`/api/library/${encodeURIComponent(date)}`);
+  } finally {
+    settle();
+  }
   if (tab !== "library") return;
   const files = day.files.map(file => ({ ...file, date }));
   const typeCount = new Set(files.map(file => file.type)).size;
-  const meta = `<dl class="page-meta"><div><dt>Files</dt><dd>${files.length}</dd></div><div><dt>Media groups</dt><dd>${typeCount}</dd></div></dl>`;
-  view.innerHTML = `<div class="page">${pageHead(longDate(date), "Every file below passed through the intake pipeline and is shown in its capture-date folder.", meta)}
-    <section class="content-section">
-      <div class="section-title-row"><button class="button secondary" type="button" data-action="back-library">Back to dates</button><span class="intake-note">${esc(date)}</span></div>
+  const meta = `${esc(date)} · ${files.length} ${plural(files.length, "file")} · ${typeCount} media ${plural(typeCount, "group")}`;
+  const back = '<button class="button secondary" type="button" data-action="back-library">Back to dates</button>';
+  view.innerHTML = `<div class="page">${pageHead(longDate(date), meta, "", back)}
+    <section class="section">
       ${files.length ? `<div class="library-grid">${files.map(file => proofCard(file, { destination: false })).join("")}</div>` : '<div class="empty-state"><h2>This date is empty</h2><p>No supported media files are currently visible in this folder.</p></div>'}
     </section>
   </div>`;
@@ -1363,32 +1234,37 @@ function decisionRows(pending, presets) {
 }
 
 async function renderAttention() {
-  loadingPage();
-  const [status, quarantine, decisions, cfg] = await Promise.all([
-    api("/api/status"), api("/api/quarantine"), api("/api/decisions"), api("/api/config"),
-  ]);
+  const settle = deferSkeleton();
+  let status, quarantine, decisions, cfg;
+  try {
+    [status, quarantine, decisions, cfg] = await Promise.all([
+      api("/api/status"), api("/api/quarantine"), api("/api/decisions"), api("/api/config"),
+    ]);
+  } finally {
+    settle();
+  }
   if (tab !== "attention") return;
   config = cfg;
   const active = activeQuarantine(quarantine.files);
   const issueTotal = active.length + decisions.pending.length + (status.health.state === "fail" ? 1 : 0);
   updateChrome(status, quarantine.files);
-  const meta = `<dl class="page-meta"><div><dt>Needs action</dt><dd>${issueTotal}</dd></div><div><dt>Pending questions</dt><dd>${decisions.pending.length}</dd></div></dl>`;
+  const meta = `${issueTotal} ${issueTotal === 1 ? "needs" : "need"} action · ${decisions.pending.length} pending ${plural(decisions.pending.length, "question")}`;
   const healthNotice = status.health.state === "fail"
-    ? `<div class="notice danger"><strong>Pipeline health check reported a problem</strong><p>${esc(status.health.detail || "Review the host health check for details.")}</p></div>`
+    ? `<section class="section"><div class="notice danger"><strong>Pipeline health check reported a problem</strong><p>${esc(status.health.detail || "Review the host health check for details.")}</p></div></section>`
     : "";
   const clearState = issueTotal === 0
-    ? '<div class="empty-state"><h2>Nothing needs you</h2><p>Accepted files are in the library. Held transfers and optional lens questions will appear here when intervention is useful.</p></div>'
+    ? '<section class="section"><p class="section-copy">Nothing needs you. Held transfers and lens questions appear here when a decision is useful.</p></section>'
     : "";
-  const resolved = decisions.resolved.length
-    ? `<div class="register-list">${decisions.resolved.map(item => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(item.rel || "Unknown file")}</div><div class="row-detail">${esc(item.outcome || "Resolved")} · via ${esc(item.via || "panel")}</div></div></div>`).join("")}</div>`
-    : '<p class="section-copy">No recent lens decisions are recorded.</p>';
+  const groups = [];
+  if (active.length) groups.push(sectionBlock("held-title", "Held files", "Retry re-runs the intake checks · Stage moves the file under quarantine/_trash", pruneBar(active) + quarantineRows(active)));
+  if (decisions.pending.length) groups.push(sectionBlock("decisions-title", "Lens decisions", "Identity metadata only · Leaving a question open changes nothing", decisionRows(decisions.pending, cfg.lens_presets || [])));
+  if (decisions.resolved.length) {
+    const resolved = `<div class="register-list">${decisions.resolved.map(item => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(item.rel || "Unknown file")}</div><div class="row-detail">${esc(item.outcome || "Resolved")} · via ${esc(item.via || "panel")}</div></div></div>`).join("")}</div>`;
+    groups.push(sectionBlock("answers-title", "Recent answers", "Answered here or through Telegram", resolved));
+  }
 
-  view.innerHTML = `<div class="page">${pageHead("Attention", "One place for pipeline alerts, held files, and optional metadata questions. Nothing here deletes an original automatically.", meta)}
-    <section class="content-section">${healthNotice}${clearState}
-      <div class="issue-block"><div class="issue-heading"><h2>Held files</h2><p>Retry sends a file back through the full intake checks. Staging moves it under quarantine/_trash for manual cleanup later.</p></div><div class="issue-content">${pruneBar(active)}${quarantineRows(active)}</div></div>
-      <div class="issue-block"><div class="issue-heading"><h2>Lens decisions</h2><p>A choice updates identity metadata only. Ignoring a question leaves the file unchanged.</p></div><div class="issue-content">${decisionRows(decisions.pending, cfg.lens_presets || [])}</div></div>
-      <div class="issue-block"><div class="issue-heading"><h2>Recent answers</h2><p>The latest completed lens questions, whether answered here or through Telegram.</p></div><div class="issue-content">${resolved}</div></div>
-    </section>
+  view.innerHTML = `<div class="page">${pageHead("Attention", meta, "Pipeline alerts, held files, and optional metadata questions. Nothing here deletes an original automatically.")}
+    ${healthNotice}${clearState}${groups.join("")}
   </div>`;
 }
 
@@ -1424,14 +1300,12 @@ function switchRow(key) {
 
 function watchedFoldersMarkup() {
   const folders = config.watched_folders || [];
-  return `<div class="automation-panel">
-    <div class="section-title-row"><h3 class="section-title">Folder register</h3><span class="intake-note">Paths must live under /data</span></div>
+  return `<div class="sub-head"><h3>Folder register</h3><span class="section-note">Paths must live under /data</span></div>
     ${folders.length ? `<div class="register-list">${folders.map((path, index) => `<div class="register-row"><div class="row-main"><div class="row-title">${esc(path)}</div><div class="row-detail">Settled files enter the same validation and sorting pipeline.</div></div><button class="button quiet" type="button" data-remove-folder="${index}">Stop watching</button></div>`).join("")}</div>` : '<p class="section-copy">No extra folders are registered. Camera uploads still arrive through incoming/.</p>'}
     <form class="inline-form" id="folder-form">
       <div class="field grow"><label for="folder-path">Add a folder under /data</label><input type="text" id="folder-path" name="folder" placeholder="/data/drop-here" autocomplete="off" required></div>
       <button class="button" type="submit">Watch folder</button>
-    </form>
-  </div>`;
+    </form>`;
 }
 
 function ruleRows() {
@@ -1454,15 +1328,14 @@ function ruleRows() {
 }
 
 function lensRulesMarkup(forceOpen) {
-  return `<div class="automation-panel">
-    <details class="advanced" id="lens-rules" ${forceOpen ? "open" : ""}>
+  return `<details class="advanced" id="lens-rules" ${forceOpen ? "open" : ""}>
       <summary>Advanced lens rules</summary>
       <div class="advanced-body">
         <p class="section-copy">The first matching EXIF Lens signature wins. Camera filters narrow a rule to specific bodies; identity tags only, never exposure.</p>
         ${ruleRows()}
         <div class="row-actions"><button class="button" type="button" data-edit-rule="-1">Add lens rule</button></div>
         <div id="rule-form"></div>
-        <div class="section-title-row"><h3 class="section-title">Test a signature</h3></div>
+        <div class="sub-head"><h3>Test a signature</h3></div>
         <div class="inline-form">
           <div class="field"><label for="rule-probe">EXIF Lens value</label><input type="text" id="rule-probe" placeholder="50mm f/1.3" autocomplete="off"></div>
           <div class="field"><label for="rule-camera">Camera body (optional)</label><input type="text" id="rule-camera" list="camera-list" placeholder="NIKON Z f" autocomplete="off"></div>
@@ -1470,30 +1343,32 @@ function lensRulesMarkup(forceOpen) {
         </div>
         <div class="probe-result" id="probe-result" aria-live="polite"></div>
       </div>
-    </details>
-  </div>`;
+    </details>`;
 }
 
 async function renderAutomations() {
-  loadingPage();
-  const [cfg, cameras] = await Promise.all([
-    api("/api/config"), api("/api/cameras").catch(() => ({ cameras: [] })),
-  ]);
+  const settle = deferSkeleton();
+  let cfg, cameras;
+  try {
+    [cfg, cameras] = await Promise.all([
+      api("/api/config"), api("/api/cameras").catch(() => ({ cameras: [] })),
+    ]);
+  } finally {
+    settle();
+  }
   if (tab !== "automations") return;
   config = cfg;
   CAMERAS = cameras.cameras || [];
   const enabled = Object.values(config.features).filter(Boolean).length;
-  const meta = `<dl class="page-meta"><div><dt>Enabled</dt><dd>${enabled} / ${Object.keys(SWITCHES).length}</dd></div><div><dt>Lens rules</dt><dd>${config.lens_rules.length}</dd></div></dl>`;
-  const invalid = config._invalid ? `<div class="notice danger"><strong>The saved configuration could not be read</strong><p>Defaults are shown. The next successful change will replace the invalid file with a validated configuration.</p></div>` : "";
+  const meta = `${enabled} of ${Object.keys(SWITCHES).length} enabled · ${config.lens_rules.length} lens ${plural(config.lens_rules.length, "rule")}`;
+  const invalid = config._invalid ? `<section class="section"><div class="notice danger"><strong>The saved configuration could not be read</strong><p>Defaults are shown. The next successful change will replace the invalid file with a validated configuration.</p></div></section>` : "";
   const forceRules = rawRoute === "rules";
 
-  view.innerHTML = `<div class="page">${pageHead("Automations", "Tune what happens after a file arrives. Changes apply to the next file; the intake pipeline does not restart.", meta)}
-    <section class="content-section">${invalid}
-      <div class="notice"><strong>Enabled is not the same as configured</strong><p>This panel stores intent. Host-mounted queues and credentials are not visible to the current API, so confirm render and Telegram prerequisites in Docker when you first enable them.</p></div>
-      <div class="automation-group"><div class="automation-intro"><h2>File intake</h2><p>Bring files in from folders beyond the camera FTP inbox.</p></div><div class="automation-list">${switchRow("watch_funnel")}${watchedFoldersMarkup()}</div></div>
-      <div class="automation-group"><div class="automation-intro"><h2>Outputs</h2><p>Create optional derivatives and low-noise phone summaries.</p></div><div class="automation-list">${switchRow("nef_render_queue")}${switchRow("telegram_notifications")}</div></div>
-      <div class="automation-group"><div class="automation-intro"><h2>Lens metadata</h2><p>Name adapted glass consistently without touching exposure values.</p></div><div class="automation-list">${switchRow("lens_massage")}${switchRow("ask_on_unknown")}${lensRulesMarkup(forceRules)}</div></div>
-    </section>
+  view.innerHTML = `<div class="page">${pageHead("Automations", meta, "Changes apply to the next file without restarting intake. Switches store intent only: render queues and Telegram credentials live on the host and are not checked here.")}
+    ${invalid}
+    ${sectionBlock("intake-group", "File intake", "Bring files in from folders beyond the camera FTP inbox", switchRow("watch_funnel") + watchedFoldersMarkup())}
+    ${sectionBlock("outputs-group", "Outputs", "Optional derivatives and low-noise phone summaries", switchRow("nef_render_queue") + switchRow("telegram_notifications"))}
+    ${sectionBlock("lens-group", "Lens metadata", "Name adapted glass consistently without touching exposure values", switchRow("lens_massage") + switchRow("ask_on_unknown") + lensRulesMarkup(forceRules))}
   </div>`;
   if (forceRules) requestAnimationFrame(() => $("#lens-rules")?.scrollIntoView({ block: "start" }));
 }

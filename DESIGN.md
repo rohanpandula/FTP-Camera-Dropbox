@@ -12,6 +12,7 @@ colors:
   rule-dark: "#747b75"
   signal: "#ee3f29"
   signal-dark: "#a61f13"
+  signal-fill: "#d52f18"
   link: "#1748c7"
   healthy: "#08744f"
   warning: "#9b4a00"
@@ -20,39 +21,39 @@ colors:
 typography:
   display:
     fontFamily: '"Big Shoulders", "Arial Narrow", sans-serif'
-    fontSize: "clamp(50px, 7vw, 92px)"
+    fontSize: "26px"
     fontWeight: 800
-    lineHeight: 0.88
-    letterSpacing: "-0.025em"
+    lineHeight: 1
+    letterSpacing: "-0.01em"
   headline:
     fontFamily: '"Big Shoulders", "Arial Narrow", sans-serif'
-    fontSize: "clamp(24px, 3vw, 36px)"
+    fontSize: "16px"
+    fontWeight: 750
+    lineHeight: 1
+    letterSpacing: "0.03em"
+  title:
+    fontFamily: '"Big Shoulders", "Arial Narrow", sans-serif'
+    fontSize: "22px"
     fontWeight: 750
     lineHeight: 1
     letterSpacing: "-0.01em"
-  title:
-    fontFamily: '"Big Shoulders", "Arial Narrow", sans-serif'
-    fontSize: "30px"
-    fontWeight: 800
-    lineHeight: 1
-    letterSpacing: "normal"
   nav:
     fontFamily: '"Big Shoulders", "Arial Narrow", sans-serif'
-    fontSize: "clamp(18px, 1.7vw, 23px)"
+    fontSize: "15px"
     fontWeight: 750
     lineHeight: 1
-    letterSpacing: "0.01em"
+    letterSpacing: "0.04em"
   control:
     fontFamily: '"Big Shoulders", "Arial Narrow", sans-serif'
-    fontSize: "14px"
+    fontSize: "12px"
     fontWeight: 750
     lineHeight: 1
-    letterSpacing: "0.025em"
+    letterSpacing: "0.05em"
   body:
     fontFamily: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "15px"
+    fontSize: "14px"
     fontWeight: 400
-    lineHeight: 1.48
+    lineHeight: 1.45
     letterSpacing: "normal"
   label:
     fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace'
@@ -76,89 +77,89 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.nav}"
     rounded: "{rounded.square}"
-    padding: "0 18px"
-    height: "112px"
+    padding: "0 20px"
+    height: "56px"
   nav-tab-active:
-    backgroundColor: "{colors.signal}"
+    backgroundColor: "{colors.signal-fill}"
     textColor: "#ffffff"
     typography: "{typography.nav}"
     rounded: "{rounded.square}"
-    padding: "0 18px"
-    height: "112px"
+    padding: "0 20px"
+    height: "56px"
   button-primary:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.sheet}"
     typography: "{typography.control}"
     rounded: "{rounded.control}"
-    padding: "11px 16px"
+    padding: "6px 12px"
   button-primary-hover:
-    backgroundColor: "{colors.signal}"
+    backgroundColor: "{colors.signal-fill}"
     textColor: "{colors.sheet}"
     typography: "{typography.control}"
     rounded: "{rounded.control}"
-    padding: "11px 16px"
+    padding: "6px 12px"
   button-secondary:
     backgroundColor: "transparent"
     textColor: "{colors.ink}"
     typography: "{typography.control}"
     rounded: "{rounded.control}"
-    padding: "11px 16px"
+    padding: "6px 12px"
   button-danger:
     backgroundColor: "transparent"
     textColor: "{colors.danger}"
     typography: "{typography.control}"
     rounded: "{rounded.control}"
-    padding: "11px 16px"
+    padding: "6px 12px"
   button-quiet:
     backgroundColor: "transparent"
     textColor: "{colors.link}"
     typography: "{typography.control}"
     rounded: "{rounded.control}"
-    padding: "8px 10px"
+    padding: "6px 8px"
   field:
     backgroundColor: "{colors.sheet}"
     textColor: "{colors.ink}"
     typography: "{typography.metadata}"
     rounded: "{rounded.control}"
-    padding: "10px 12px"
-    height: "44px"
+    padding: "6px 10px"
+    height: "36px"
   chip:
     backgroundColor: "transparent"
     textColor: "{colors.ink}"
     typography: "{typography.label}"
     rounded: "{rounded.square}"
-    padding: "6px 8px"
+    padding: "5px 8px"
   switch-off:
     backgroundColor: "{colors.sheet-2}"
     textColor: "{colors.ink-soft}"
     typography: "{typography.label}"
     rounded: "{rounded.square}"
-    width: "76px"
-    height: "38px"
+    width: "48px"
+    height: "26px"
   switch-on:
     backgroundColor: "#f4d3cc"
     textColor: "{colors.signal-dark}"
     typography: "{typography.label}"
     rounded: "{rounded.square}"
-    width: "76px"
-    height: "38px"
+    width: "48px"
+    height: "26px"
   proof-card:
     backgroundColor: "{colors.sheet}"
     textColor: "{colors.ink}"
     typography: "{typography.metadata}"
     rounded: "{rounded.square}"
-  intake-rail:
+  status-strip:
     backgroundColor: "{colors.sheet}"
     textColor: "{colors.ink}"
     typography: "{typography.metadata}"
     rounded: "{rounded.square}"
-    padding: "18px clamp(24px, 3.2vw, 46px) 20px"
-  condition-report:
-    backgroundColor: "#f1d8d1"
-    textColor: "#54251f"
+    padding: "16px"
+  attention-list:
+    backgroundColor: "{colors.sheet}"
+    textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.square}"
-    padding: "0 22px 30px"
+    padding: "16px clamp(16px, 2.5vw, 32px) 24px"
 ---
 
 # Design System: FTP Camera Dropbox
@@ -176,9 +177,9 @@ The world deliberately rejects both the black camera-body dashboard and the roun
 - Cool archival paper with a subtle photographed-paper wash.
 - Compressed Big Shoulders display type paired with readable system sans and tabular mono.
 - Square ruled cells with selective clipped top-right corners.
-- Four equal index tabs and a mobile bottom index.
-- One vermilion intake thread, active only when work is arriving.
-- Aggregate status and condition-report evidence without invented per-file progress.
+- A 56px index bar whose tabs size to their labels, and a mobile bottom index.
+- One vermilion thread: the selected tab, the needs-attention rule, and live-arrival marks.
+- Aggregate status in one strip and a needs-attention list, without invented per-file progress.
 
 ## Colors
 
@@ -186,7 +187,7 @@ The palette is a cool, low-chroma paper-and-ink field interrupted by functional 
 
 ### Primary
 
-- **Intake Vermilion** (`signal`): Marks the active index tab, live-arrival verdict, intake thread, active nodes, and condition-report heading.
+- **Intake Vermilion** (`signal`): Marks live-arrival state, the needs-attention rule, the switch block, and the brand mark. `signal-fill` is the deeper vermilion used wherever white text sits on vermilion (active tab, button hover) so the pair reads at 4.9:1.
 - **Deep Vermilion** (`signal-dark`): Carries numbered protection marks and darker signal text; the same extracted value is independently exposed as `danger` for destructive or failed states.
 
 ### Secondary
@@ -226,12 +227,14 @@ The palette is a cool, low-chroma paper-and-ink field interrupted by functional 
 
 ### Hierarchy
 
-- **Display** (800, `clamp(50px, 7vw, 92px)`, 0.88): Page verdicts and primary page titles; keep the measure to roughly 13 characters and use the mobile override `clamp(48px, 15vw, 72px)` below 760px.
-- **Headline** (750, `clamp(24px, 3vw, 36px)`, 1): Uppercase section headings and ledger divisions.
-- **Title** (800, 30px, 1): Condition-report and grouped-task headings.
-- **Body** (400, 15px, 1.48): Explanations and operational guidance; larger verdict support copy may rise to `clamp(16px, 1.7vw, 21px)`.
+The scale is fixed pixels (10, 11, 12, 13, 14, 16, 18, 22, 26), never fluid: the panel is an operating surface viewed at a consistent distance, and a heading that shrinks with the viewport reads as noise, not rhythm.
+
+- **Display** (800, 26px, 1): Page titles (uppercase) and the Now verdict (sentence case, 24px on phones).
+- **Headline** (750, 16px, 1, 0.03em): Uppercase section headings; sub-headings inside a section drop to 13px.
+- **Title** (750, 22px, 1): Status-strip fact values; row counts use the same face at 18px.
+- **Body** (400, 14px, 1.45): Explanations and operational guidance; supporting copy under a heading or row runs 12–13px in soft ink.
 - **Label** (700, 10px, 0.08em): Uppercase evidence labels, counters, and field labels.
-- **Metadata** (700, 13px, 1.3): Filenames, paths, counts, dates, and compact technical facts, with tabular numerals wherever values align.
+- **Metadata** (700, 12–13px, 1.3): Filenames, paths, counts, dates, and compact technical facts, with tabular numerals wherever values align; 11px for captions and notes.
 
 ### Named Rules
 
@@ -239,19 +242,19 @@ The palette is a cool, low-chroma paper-and-ink field interrupted by functional 
 
 ## Layout
 
-The shell is a centered ledger no wider than 1440px, framed by one-pixel rules. Desktop navigation is a four-cell horizontal index joined to the brand and status strip. Major compositions use hard grid joins: the verdict pairs one oversized sentence with two evidence cells; the Now view pairs a narrow condition report with a broad proof field; recent proof uses four columns at full width.
+The shell is a centered ledger no wider than 1440px, framed by one-pixel rules. A 56px sticky index bar holds the wordmark, the four tabs, and live status. The Now view stacks, in reading order: a status strip (the verdict cell plus four evidence cells), an In Intake list only while files are arriving, a needs-attention list only while something needs a decision, recent proof six across, and a collapsed protection note. Every other view is a one-line page head followed by ruled rows.
 
-Gutters are fluid rather than a named spacing scale: header padding uses `clamp(20px, 2.7vw, 40px)`, page and content gutters use `clamp(20px, 4vw, 56px)`, and major vertical section padding typically falls between 28px and 48px. Preserve the dense register rhythm instead of inserting isolated floating cards.
+Spacing uses a 4px scale (4, 8, 12, 16, 24, 32): 6–8px inside a row, 12px under a heading, 16px of section padding, 24px after a section's last row. Page gutters are `clamp(16px, 2.5vw, 32px)`. Rows are at least 44px tall so every list is already a touch target. Preserve the dense register rhythm instead of inserting isolated floating cards.
 
-At 1099px the header compacts, the verdict stacks, proof becomes two columns, and the attention column narrows to 240px. At 760px the four index tabs move into a fixed 68px bottom bar, major grids become single-column, galleries stay two-column, and controls expand to at least 44px. At 440px evidence facts and action rows stack while the two-column contact sheet remains.
+At 1099px the verdict spans the strip and the four facts sit beneath it; proof becomes four columns. At 760px the tabs move into a fixed 60px bottom bar, facts form a 2×2 grid, proof is three across, forms stack, and controls grow to 44px. At 440px action rows stack while the three-column contact sheet remains.
 
 ### Named Rules
 
-**The Four-Tab Rule.** Now, Library, Attention, and Automations always share the navigation width equally; on small screens the same index moves intact to the bottom edge.
+**The Four-Tab Rule.** Now, Library, Attention, and Automations always appear in that order; on desktop each tab sizes to its label, and on small screens the same index moves intact to the bottom edge and shares the width equally.
 
 ## Elevation & Depth
 
-This is a flat system with no surface elevation or card shadow vocabulary. Depth comes from the difference between paper, sheet, and muted-sheet tones; a 512px archival-paper texture under translucent paper washes; one-pixel structural rules; and the overlap created by clipped tabs and registers. The intake-stage circles use `0 0 0 1px` only as an outline extension, not as elevation.
+This is a flat system with no surface elevation or card shadow vocabulary. Depth comes from the difference between paper, sheet, and muted-sheet tones; a 512px archival-paper texture under translucent paper washes; one-pixel structural rules; and the overlap created by clipped tabs and registers.
 
 ### Named Rules
 
@@ -259,9 +262,9 @@ This is a flat system with no surface elevation or card shadow vocabulary. Depth
 
 ## Shapes
 
-Square is the default silhouette. Buttons and fields permit only a restrained 2px radius; the rectangular switch is explicitly square. True circles are reserved for the status dot, camera mark, and intake-stage nodes.
+Square is the default silhouette. Buttons and fields permit only a restrained 2px radius; the rectangular switch is explicitly square. True circles are reserved for the status dot and the camera mark.
 
-Clipping supplies the signature geometry: the active desktop index loses a 14px top-right corner, reduced to 10px on mobile, while the condition report loses an 18px top-right corner. Structural borders are one pixel and the intake connector is two pixels; thumbnails and ledger cells stay square.
+Clipping supplies the signature geometry: the active index tab loses a 10px top-right corner. Structural borders are one pixel; the needs-attention list opens with a 3px vermilion rule; thumbnails and ledger cells stay square.
 
 ### Named Rules
 
@@ -271,12 +274,12 @@ Clipping supplies the signature geometry: the active desktop index loses a 14px 
 
 ### Buttons
 
-- **Shape:** Registry rectangle with a 1px ink border and a restrained 2px radius; 42px minimum height on desktop and 44px on mobile.
-- **Primary:** Near-black ink fill with accession-sheet text and `11px 16px` padding; hover switches to vermilion and active presses down by 1px.
+- **Shape:** Registry rectangle with a 1px ink border and a restrained 2px radius; 32px minimum height on desktop and 44px on mobile.
+- **Primary:** Near-black ink fill with accession-sheet text and `6px 12px` padding; hover switches to the deeper vermilion fill and active presses down by 1px.
 - **Secondary:** Transparent sheet with register-ink text; hover fills with the muted sheet.
 - **Danger:** Transparent danger border and text; hover fills danger red and reverses the label to white.
 - **Quiet:** Borderless evidence-blue action; hover gains a muted-sheet field and dark ink. Mobile quiet actions still present a 44px target.
-- **Focus / Disabled:** The global focus treatment is a 3px evidence-blue outline with 3px offset. Disabled controls retain their form at 48% opacity and use a waiting cursor.
+- **Focus / Disabled:** The global focus treatment is a 3px evidence-blue outline with 2px offset. Disabled controls retain their form at 48% opacity and use a waiting cursor.
 
 ### Chips
 
@@ -288,38 +291,38 @@ Clipping supplies the signature geometry: the active desktop index loses a 14px 
 - **Corner Style:** Square by default; proof thumbnails and captions share hard edges.
 - **Background:** Accession sheet over a muted-sheet media placeholder.
 - **Shadow Strategy:** None; cards join through one-pixel dark rules.
-- **Internal Padding:** Proof captions use `14px 14px 16px`, compacting to 11px on mobile.
-- **Behavior:** Proof media stays 4:3. Hover scales imagery only to 1.018 and adds a slight contrast lift; filenames, media type, time, and capture-date destination remain visible evidence.
+- **Internal Padding:** Proof captions use `8px 10px 10px`, compacting to `6px 8px 8px` on mobile.
+- **Behavior:** Proof media stays 4:3. On Now the image itself is a button that opens the capture-date folder; hover scales it to 1.02. Filename, media type, time, and the capture date remain visible evidence.
 
 ### Inputs / Fields
 
-- **Style:** Accession-sheet fill, one-pixel dark register border, 2px radius, monospace value, `10px 12px` padding, and a 44px minimum height.
+- **Style:** Accession-sheet fill, one-pixel dark register border, 2px radius, monospace value, `6px 10px` padding, and a 36px minimum height (44px on mobile).
 - **Focus:** Border changes to evidence blue and gains a 3px translucent blue outline.
 - **Placeholder:** Faint ink at full opacity. Labels remain uppercase 10px monospace.
 
 ### Navigation
 
-Four equal uppercase Big Shoulders tabs form one ruled index. Hover uses the muted sheet; the active tab uses vermilion, white text, `aria-current="page"`, and the clipped top-right corner. Attention may carry a small bordered monospace count. Below 760px, the same four tabs become a fixed 68px bottom index while the compact header retains brand and aggregate status.
+Uppercase Big Shoulders tabs sit in the 56px index bar, each sized to its label. Hover uses the muted sheet; the active tab uses the deeper vermilion fill, white text, `aria-current="page"`, and the clipped top-right corner. Attention may carry a small bordered monospace count. Below 760px, the same four tabs become a fixed 60px bottom index while the compact header retains brand and aggregate status.
 
 ### Aggregate Status and Verdict
 
-The chrome computes inbound work as receiving plus files waiting or checking. Attention is active quarantine plus pending lens decisions, with one additional item when health has failed. Failed health takes precedence, then inbound work, then unresolved attention, then the clean monitoring state. The oversized verdict follows the same order and pairs the sentence with explicit pipeline evidence and storage availability. Status always includes text and a polite spoken label; color is never the only cue.
+The chrome computes inbound work as receiving plus files waiting or checking. Attention is active quarantine plus pending lens decisions, with one additional item when health has failed. Failed health takes precedence, then inbound work, then unresolved attention, then the clean monitoring state. The one-line verdict follows the same order and shares the status strip with four evidence cells: pipeline, in intake (receiving plus checking), filed today, and free space. Status always includes text and a polite spoken label; color is never the only cue.
 
-### Intake Rail
+### Status Strip
 
-The rail has four fixed stations: Camera, Receiving, Waiting / Checking, and Filed by Date. Its two-pixel connector turns vermilion and reveals across the row only while aggregate inbound work is nonzero; it never represents per-file progress. On mobile, station names and values remain while secondary descriptions drop away.
+One ruled row: the verdict cell (two columns wide) and four fact cells, each with a 10px label, a 22px value, and an 11px monospace detail that may wrap to a second line rather than truncate. While inbound work is nonzero an In Intake section lists the files still settling with size and arrival age; it never represents per-file progress.
 
-### Condition Report
+### Needs-Attention List
 
-One 18px-clipped blush register holds every urgent category: failed pipeline health, recoverable quarantine files, and optional lens decisions. A vermilion heading and ruled issue entries carry consequence copy and direct actions. When clear, it states that nothing needs the operator; on mobile the clear report may collapse so accepted photographs reach the first scroll.
+When health has failed, files are held, or lens decisions are pending, a section opens under a 3px vermilion rule with one 44px row per category; each row is a link into Attention and carries its consequence copy. When nothing needs the operator the section is absent and the verdict says so. The Attention view likewise renders only the groups that have content, plus a one-line clear state.
 
 ### Rectangular Switch
 
-The workflow switch is a 76px by 38px ruled rectangle with explicit ON/OFF text and a moving 28px ink block. Its checked state uses a pale signal wash, vermilion border, darker signal text, and a vermilion block. On mobile the control becomes 44px high and the block becomes 34px, preserving a full touch target.
+The workflow switch is a 48px by 26px ruled track inside a 48px by 44px hit area, with a moving 18px ink block; state is carried by block position, fill, and `aria-checked`, not by text. Its checked state uses a pale signal wash, vermilion border, and a vermilion block.
 
 ### Named Rules
 
-**The Aggregate Truth Rule.** Show only aggregate states the API can prove; do not turn the intake rail, verdict, or cards into fictional per-file stages, transfer progress, or readiness claims.
+**The Aggregate Truth Rule.** Show only aggregate states the API can prove; do not turn the status strip, verdict, or cards into fictional per-file stages, transfer progress, or readiness claims.
 
 ## Do's and Don'ts
 
@@ -336,5 +339,5 @@ The workflow switch is a 76px by 38px ruled rectangle with explicit ON/OFF text 
 - Don't describe structural validation as a source-to-destination checksum comparison.
 - Don't imply per-file pipeline stages, transfer percentage, quarantine reasons, camera identity, or integration readiness that the API does not expose.
 - Don't introduce rounded SaaS cards, pill controls, diffuse shadows, gradients as decoration, or a black camera-body dashboard.
-- Don't scatter urgent items across the interface; the condition report and Attention index own exceptions.
+- Don't scatter urgent items across the interface; the needs-attention list and Attention index own exceptions.
 - Don't use vermilion on routine copy or inactive surfaces; its rarity is what makes the intake thread legible.

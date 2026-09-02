@@ -9,3 +9,4 @@ __pycache__/
 .impeccable/
 .claude/worktrees/
 .venv*/
+.claude/launch.json
