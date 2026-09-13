@@ -13,6 +13,7 @@ validated paths via argv only).
 from __future__ import annotations
 
 import asyncio
+import filecmp
 import hashlib
 import io
 import json
@@ -32,6 +33,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image, ImageOps
+try:  # iPhone HEIC has no JPEG item to extract; Pillow needs a HEIF decoder for it
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:  # outside the image: camera HIF still thumbs through exiftool
+    pass
 
 log = logging.getLogger("panel")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] panel: %(message)s")
@@ -55,13 +61,20 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SIDECARS = {".xmp", ".acr"}
 RAW_EXTS = {".nef", ".arw", ".raf", ".dng", ".nrw", ".cr2", ".cr3"}
 IMG_EXTS = {".jpg", ".jpeg", ".tif", ".tiff"}
+# Camera HEIF (Fujifilm .HIF) carries JPEG previews as HEIF items, so it thumbs
+# like a RAW: extract first. iPhone .HEIC has no JPEG item, so it falls through
+# to a full pillow-heif decode. ponytail: full decode, use the HEIF thumbnail
+# item if 48 MP phones make this slow.
+HEIF_EXTS = {".hif", ".heif", ".heic"}
 FEATURES = ("lens_massage", "nef_render_queue", "telegram_notifications", "watch_funnel",
-            "ask_on_unknown")
+            "ask_on_unknown", "profile_sidecar")
 
 # Matches the validation sort.sh re-applies before writing tags.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./-]{0,62}$")
 INFO_RE = re.compile(r"^[0-9][0-9. ]{0,30}$")
 FOCAL_RE = re.compile(r"^[0-9]{1,4}(\.[0-9])?$")
+# Camera profile names land inside an XMP attribute the sorter writes.
+PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ()._+/-]{0,62}$")
 
 DEFAULT_CONFIG = {
     "features": {k: True for k in FEATURES},
@@ -74,6 +87,12 @@ DEFAULT_CONFIG = {
          "set_focal_length": "35"},
     ],
     "watched_folders": [],
+    # Profile the sorter names in a sidecar beside each new RAW from a body
+    # whose name contains `camera`, so Lightroom imports it already selected.
+    "profile_sidecars": [
+        {"camera": "ILCE-7CR", "profile": "Cobalt Standard (S)"},
+        {"camera": "GFX100 II", "profile": "Cobalt Standard (S)"},
+    ],
     # Buttons offered when the sorter meets glass no rule matches — over
     # Telegram and on the Decisions tab. Unanswered questions auto-close
     # after ask_timeout_hours with no EXIF change.
@@ -157,6 +176,9 @@ def load_config() -> dict:
     # persists them.
     for k, v in DEFAULT_CONFIG.items():
         cfg.setdefault(k, json.loads(json.dumps(v)))
+    # Switches added after the file was written (profile_sidecar) must surface
+    # too: the sorter treats a missing switch as on, so the UI must say so.
+    cfg["features"] = {**DEFAULT_CONFIG["features"], **cfg["features"]}
     return cfg
 
 
@@ -241,6 +263,23 @@ def validate_config(cfg: dict) -> None:
     for p in wf:
         validate_watch_folder(p)
 
+    ps = cfg.get("profile_sidecars", [])
+    if not isinstance(ps, list) or len(ps) > 16:
+        raise ValueError("profile_sidecars must be a list of at most 16 rules")
+    for i, r in enumerate(ps):
+        where = f"profile rule {i + 1}"
+        if not isinstance(r, dict):
+            raise ValueError(f"{where}: must be an object")
+        cam = r.get("camera")
+        if not isinstance(cam, str) or not 1 <= len(cam) <= 64 or not cam.isprintable():
+            raise ValueError(f"{where}: camera must be 1-64 printable chars (substring of the body name)")
+        prof = r.get("profile")
+        if not isinstance(prof, str) or not PROFILE_RE.match(prof):
+            raise ValueError(f"{where}: profile must be letters/digits/space/()._+/-, max 63")
+        extra = set(r) - {"camera", "profile"}
+        if extra:
+            raise ValueError(f"{where}: unknown fields {sorted(extra)}")
+
     hours = cfg.get("ask_timeout_hours", 12)
     if not isinstance(hours, (int, float)) or isinstance(hours, bool) or not 1 <= hours <= 168:
         raise ValueError("ask_timeout_hours must be 1-168")
@@ -277,7 +316,7 @@ def validate_config(cfg: dict) -> None:
             raise ValueError(f"{where}: unknown fields {sorted(extra)}")
 
     extra = set(cfg) - {"features", "lens_rules", "watched_folders",
-                        "ask_timeout_hours", "lens_presets"}
+                        "ask_timeout_hours", "lens_presets", "profile_sidecars"}
     if extra:
         raise ValueError(f"unknown config fields {sorted(extra)}")
 
@@ -340,8 +379,12 @@ def api_status():
                 if f.name.startswith("."):
                     continue
                 st = f.stat()
+                # Camera files carry the capture mtime, not the arrival time —
+                # mtime measured how old the photo is, not how long it has sat
+                # in intake, so a freshly dropped RAW could report hours in
+                # intake and trip the stuck lamp. ctime is when the inode landed.
                 incoming.append({"name": f.name, "size": st.st_size,
-                                 "age_s": int(now - st.st_mtime)})
+                                 "age_s": int(now - st.st_ctime)})
             except OSError:
                 continue
             if len(incoming) >= 50:
@@ -480,8 +523,14 @@ def source_orientation(path: Path) -> int:
         return 1
 
 
-def extract_preview(path: Path) -> bytes | None:
-    for tag in ("-PreviewImage", "-JpgFromRaw", "-OtherImage", "-ThumbnailImage"):
+RAW_PREVIEW_TAGS = ("-PreviewImage", "-JpgFromRaw", "-OtherImage", "-ThumbnailImage")
+# X100VI HIF: OtherImage is the 1920x1280 3:2 JPEG; PreviewImage is only 640x480
+# at 4:3, so the RAW order would pick the wrong one.
+HEIF_PREVIEW_TAGS = ("-OtherImage", "-PreviewImage", "-ThumbnailImage")
+
+
+def extract_preview(path: Path, tags: tuple[str, ...] = RAW_PREVIEW_TAGS) -> bytes | None:
+    for tag in tags:
         try:
             out = subprocess.run(
                 ["exiftool", "-b", tag, "-api", "largefilesupport=1", str(path)],
@@ -500,7 +549,8 @@ def api_thumb(f: str):
     except ValueError:
         return err("bad path")
     ext = path.suffix.lower()
-    if not path.is_file() or ext not in RAW_EXTS | IMG_EXTS:
+    embedded = ext in RAW_EXTS or ext in HEIF_EXTS
+    if not path.is_file() or not (embedded or ext in IMG_EXTS):
         return err("no preview", 404)
     try:
         st = path.stat()
@@ -516,8 +566,9 @@ def api_thumb(f: str):
         return err("file too large to preview", 404)
 
     with _thumb_gate:
-        raw = extract_preview(path) if ext in RAW_EXTS else None
-        if raw is None and ext in IMG_EXTS:
+        preview = extract_preview(path, HEIF_PREVIEW_TAGS if ext in HEIF_EXTS else RAW_PREVIEW_TAGS) if embedded else None
+        raw = preview
+        if raw is None and (ext in IMG_EXTS or ext in HEIF_EXTS):
             try:
                 raw = path.read_bytes()
             except OSError:
@@ -533,8 +584,8 @@ def api_thumb(f: str):
                 pass
             if own != 1:
                 img = ImageOps.exif_transpose(img)
-            elif ext in RAW_EXTS:
-                o = source_orientation(path)
+            elif preview is not None:  # embedded previews are stored unrotated (ARW, X100VI HIF);
+                o = source_orientation(path)  # a pillow-heif decode already applied the file's own tag
                 if o in _TRANSPOSE:
                     img = img.transpose(_TRANSPOSE[o])
             img.thumbnail((480, 480))
@@ -578,7 +629,7 @@ async def api_config_put(request: Request):
     # rules and folders are whole-list edits by design.
     if isinstance(body.get("features"), dict):
         merged["features"] = {**merged.get("features", {}), **body["features"]}
-    for k in ("lens_rules", "watched_folders", "ask_timeout_hours", "lens_presets"):
+    for k in ("lens_rules", "watched_folders", "ask_timeout_hours", "lens_presets", "profile_sidecars"):
         if k in body:
             merged[k] = body[k]
     try:
@@ -598,9 +649,11 @@ _lib_index_cache = {"ts": 0.0, "index": {}}
 
 
 def _library_name_sizes() -> dict:
-    # name -> set of sizes across sorted/, used to recognise a held file whose
-    # identical copy already lives in the library. Cached briefly: the walk is
-    # cheap relative to exiftool work but not free on very large libraries.
+    # name -> {size: [paths]} across sorted/, used to recognise a held file
+    # whose name and size already appear in the library. Paths are retained
+    # (not just sizes) because prune_verified needs candidates to byte-compare
+    # against, not just a size match. Cached briefly: the walk is cheap
+    # relative to exiftool work but not free on very large libraries.
     with _lib_index_lock:
         now = time.time()
         if now - _lib_index_cache["ts"] < 60:
@@ -609,7 +662,13 @@ def _library_name_sizes() -> dict:
         if SORTED.is_dir():
             for f in walk_files(SORTED):
                 try:
-                    index.setdefault(f.name, set()).add(f.stat().st_size)
+                    # /data is SMB-writable: a symlink planted under sorted/
+                    # must never count as an archived copy, or prune would
+                    # delete a held file with no genuine backing (review CR-01).
+                    if f.is_symlink() or not f.is_file():
+                        continue
+                    st = f.stat()
+                    index.setdefault(f.name, {}).setdefault(st.st_size, []).append(f)
                 except OSError:
                     continue
         _lib_index_cache["ts"] = now
@@ -629,7 +688,7 @@ def api_quarantine():
         files.append({"rel": str(f.relative_to(QUAR)), "name": f.name,
                       "date": f.parent.name, "size": st.st_size,
                       "mtime": int(st.st_mtime),
-                      "in_library": st.st_size in index.get(f.name, set())})
+                      "in_library": st.st_size in index.get(f.name, {})})
     files.sort(key=lambda x: x["mtime"], reverse=True)
     return no_store({"files": files[:500]})
 
@@ -646,23 +705,49 @@ async def api_quarantine_action(request: Request):
         return err("unknown action")
 
     if action == "prune_verified":
-        # Bulk cleanup: delete only held files whose name+size exactly matches a
-        # copy already in sorted/. Everything else stays for a human decision.
+        # Bulk cleanup: delete only held files whose bytes match a same-name,
+        # same-size copy already in sorted/. A name+size match alone is not
+        # proof — two different frames from the same body can share both.
+        # Everything that isn't proven identical stays for a human decision.
         index = _library_name_sizes()
-        removed = 0
+        removed = kept = 0
+        # ponytail: each candidate's bytes are read fresh on every prune call,
+        # no cache. Upgrade to a content-hash cache on the library index if
+        # quarantine ever holds hundreds of RAWs at once.
         for f in list(walk_files(QUAR)):
             try:
-                if f.is_symlink() or f.stat().st_size not in index.get(f.name, set()):
+                if f.is_symlink():
                     continue
-                f.unlink()
-                removed += 1
+                st = f.stat()
+                candidates = index.get(f.name, {}).get(st.st_size, [])
+                if not candidates:
+                    continue
+                identical = False
+                for candidate in candidates:
+                    try:
+                        # Re-check at compare time: the index is cached for
+                        # 60 s and a candidate could have been swapped since.
+                        if candidate.is_symlink() or not candidate.is_file():
+                            continue
+                        if filecmp.cmp(f, candidate, shallow=False):
+                            identical = True
+                            break
+                    except OSError:
+                        # A read error proves nothing — never delete on it.
+                        continue
+                if identical:
+                    f.unlink()
+                    removed += 1
+                else:
+                    kept += 1
             except OSError:
                 continue
         for child in list(QUAR.iterdir()):
             if child.is_dir() and not child.name.startswith("_") and not any(child.iterdir()):
                 child.rmdir()
-        log.info("quarantine prune_verified: removed %d verified duplicates", removed)
-        return no_store({"ok": True, "removed": removed})
+        log.info("quarantine prune_verified: removed %d verified duplicates, kept %d unverified",
+                  removed, kept)
+        return no_store({"ok": True, "removed": removed, "kept": kept})
 
     try:
         src = safe_child(QUAR, rel)

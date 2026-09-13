@@ -6,3 +6,7 @@ data/
 *.failed.*
 __pycache__/
 *.pyc
+.impeccable/
+.claude/worktrees/
+.venv*/
+.claude/launch.json

@@ -531,7 +531,7 @@ async def _tg_send(text: str) -> bool:
                 return True
             log.warning("Telegram send failed: HTTP %d %s", resp.status_code, resp.text[:200])
         except Exception as exc:
-            log.warning("Telegram send exception: %s", exc)
+            log.warning("Telegram send exception: %s: %r", type(exc).__name__, exc)
     return False
 
 
@@ -552,11 +552,13 @@ async def notify_failure(kind: str, detail: str, throttle_minutes: int = 15) -> 
 async def _remember_c2c_folder(parent_folder: str | None, account_id: str) -> None:
     """Remember reconciliation identifiers without blocking this download.
 
-    Camera-to-Cloud gives each paired device its own ingest folder, so every
-    distinct folder is retained (c2c_folder_ids) and swept by reconciliation —
-    a newly paired camera must never be silently excluded from the
-    missed-webhook backfill. The legacy single c2c_folder_id is still written
-    on first discovery for compatibility with existing state files.
+    Camera-to-Cloud creates ingest folders over time — per paired device and,
+    as observed in production, per capture day — so the registry keeps the 16
+    most recently seen folders (LRU: a re-seen folder is promoted, the oldest
+    is evicted for a new one). Newest folders are exactly the ones a missed
+    webhook needs backfilled from; a folder idle for 16 discoveries no longer
+    needs sweeping. The legacy single c2c_folder_id is still written on first
+    discovery for compatibility with existing state files.
     """
     if not isinstance(parent_folder, str) or not parent_folder or len(parent_folder) > 200:
         return
@@ -577,13 +579,17 @@ async def _remember_c2c_folder(parent_folder: str | None, account_id: str) -> No
         CFG["c2c_folder_id"] = parent_folder
     if parent_folder not in known:
         if len(known) >= 16:
-            log.warning(
-                "Not remembering C2C folder %s…: registry already holds %d folders",
+            log.info(
+                "C2C folder registry full: evicting oldest %s… for %s…",
+                known[0][:8],
                 parent_folder[:8],
-                len(known),
             )
-        else:
-            updates["c2c_folder_ids"] = known + [parent_folder]
+        updates["c2c_folder_ids"] = (known + [parent_folder])[-16:]
+    elif known and known[-1] != parent_folder:
+        # LRU promotion: today's active folder must never age out while a
+        # burst of historical folders churns the registry.
+        known.remove(parent_folder)
+        updates["c2c_folder_ids"] = known + [parent_folder]
     if not current_account:
         updates["c2c_account_id"] = account_id
         CFG["c2c_account_id"] = account_id
@@ -1187,19 +1193,21 @@ async def _process_reconcile_jobs(jobs: list[tuple[str, str]]) -> int:
 
 
 def _reconcile_folder_ids() -> list[str]:
-    """Every ingest folder to sweep: the legacy single id plus each
-    folder discovered since (one per paired Camera-to-Cloud device)."""
+    """Ingest folders to sweep: the LRU registry (newest last), falling back
+    to the legacy single id for state files written before the registry."""
     state = _load_state()
     ids: list[str] = []
-    primary = CFG["c2c_folder_id"] or state.get("c2c_folder_id")
-    if isinstance(primary, str) and primary:
-        ids.append(primary)
     stored = state.get("c2c_folder_ids")
     if isinstance(stored, list):
         for fid in stored:
             if isinstance(fid, str) and fid and len(fid) <= 200 and fid not in ids:
                 ids.append(fid)
-    return ids[:16]
+    if ids:
+        return ids[-16:]
+    primary = CFG["c2c_folder_id"] or state.get("c2c_folder_id")
+    if isinstance(primary, str) and primary:
+        return [primary]
+    return []
 
 
 async def _sweep_folder(
@@ -1374,7 +1382,9 @@ async def reconcile_once() -> int:
 
     except Exception as exc:
         listing_complete = False
-        log.error("Reconcile listing failed: %s", exc)
+        # httpx timeout exceptions stringify to an empty message, which produced
+        # "Reconcile listing failed: " with nothing after the colon on 2026-08-23.
+        log.error("Reconcile listing failed: %s: %r", type(exc).__name__, exc)
         await notify_failure(
             "reconcile_list_failed",
             f"Frame.io folder listing raised {type(exc).__name__}; durable jobs will still retry.",

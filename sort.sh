@@ -867,10 +867,19 @@ heif_container_validate() {
       return 1
     }
     remaining=$((file_size - offset))
-    (( remaining >= 8 )) || {
+    if (( remaining < 8 )); then
+      # Some writers pad the file to 4-byte alignment after the last box:
+      # X100VI DSCF8283.HIF carries three zero bytes past mdat and was
+      # quarantined here on 2026-08-28 although exiftool reads it fine.
+      # A real truncation is still caught below — the cut box's declared
+      # size overruns EOF — so only a walk that already parsed a box may
+      # stop here; first bytes that cannot form a box header still fail.
+      # (With the 50000-byte size floor above, box_count == 0 cannot reach
+      # this branch; it stays as the fallback should that floor ever change.)
+      (( box_count > 0 )) && break
       log "validate: heif truncated box header at byte $offset"
       return 1
-    }
+    fi
     size32=$(read_be_u32 "$f" "$offset") || {
       log "validate: heif unreadable box size at byte $offset"
       return 1
@@ -1088,6 +1097,10 @@ massage_nef_lens() {
   # LensMake). Runs post-move on the sorted copy — a failed write leaves a
   # valid, unmassaged file.
   #
+  # The name is historical: this also runs for .arw now (adapted glass on the
+  # a7CR). ponytail: rename this and NEF_LENS_MASSAGE when a third body joins —
+  # today a rename is a large diff for zero behavior change.
+  #
   # Rules come from the panel config when present (matched on the Lens
   # signature, first hit wins); the built-in case below is the fallback when
   # no config exists, so the pipeline works identically without the panel.
@@ -1095,11 +1108,28 @@ massage_nef_lens() {
   # case-insensitive substring of the body name), exclude_camera carves out
   # of that set; both may combine. Camera comes from the caller's already-
   # sanitized get_camera value — no extra EXIF read.
-  local f=$1 base=$2 camera=${3:-} lens lensid rule idre
+  local f=$1 base=$2 camera=${3:-} lens lensid rule idre sig focal ask=1
   panel_flag lens_massage || return 0
   lens=$(exiftool_read -Lens -s3 "$f") || lens=""
   lens=${lens%%$'\n'*}
-  [[ -n "$lens" ]] || return 0
+  if [[ -z "$lens" ]]; then
+    # Sony bodies carry no Composite:Lens at all — exiftool only derives that
+    # tag from Nikon maker notes — so every a7CR frame used to return here. The
+    # LM-EA9 reports a fixed LensModel ("TECHART LM-EA9"), LensInfo and LensID
+    # whatever glass is mounted; FocalLength is the only tag that separates the
+    # M lenses, so the signature the panel rule matches is "<model> <focal>mm".
+    # Keep the read above exactly as it is: adding -n to it would print the
+    # Nikon signature as "40 40 2 2" and break every existing rule.
+    sig=$(exiftool_read -T -LensModel -FocalLength -n "$f") || sig=""
+    sig=${sig%%$'\n'*}
+    IFS=$'\t' read -r lens focal <<<"$sig"
+    # -T prints "-" for a tag the file does not have.
+    [[ -n "$lens" && "$lens" != "-" ]] || return 0
+    if [[ -n "$focal" && "$focal" != "-" ]]; then
+      lens="$lens ${focal}mm"
+    fi
+    ask=0
+  fi
 
   if [[ -f "$PANEL_CONFIG" ]]; then
     rule=$(jq -c --arg lens "$lens" --arg cam "$camera" '
@@ -1134,7 +1164,13 @@ massage_nef_lens() {
     # so deleting a rule in the panel really turns that rewrite off. Unknown
     # non-native glass gets queued for an interactive decision instead.
     if jq -e '.lens_rules | type == "array"' "$PANEL_CONFIG" >/dev/null 2>&1; then
-      queue_lens_question "$f" "$base" "$lens" "$camera"
+      # Only the Composite:Lens signature asks. The LensModel fallback sees
+      # every native Sony lens too, and native glass must never raise a panel
+      # question — the ask flow exists for the dumb adapters that report
+      # nothing usable.
+      if (( ask )); then
+        queue_lens_question "$f" "$base" "$lens" "$camera"
+      fi
       return 0
     fi
   fi
@@ -1207,6 +1243,68 @@ queue_nef_for_render() {
   else
     log "nef-queue link failed: $base"
   fi
+  return 0
+}
+
+write_profile_sidecar() {
+  # write_profile_sidecar <sorted raw> <camera identity>
+  # The operator applies one camera profile to every frame some bodies shoot
+  # (2026-09-02 library: Cobalt Standard (S) on 86% of A7CR and 69% of
+  # GFX100 II sidecars). A sidecar naming that profile lets Lightroom import
+  # the frame with it already selected; nothing else is set. Name only, no
+  # CameraProfileDigest: LrC resolves profiles by name per body (its own
+  # "Group: ..." sidecars carry no digest) and a digest goes stale the day the
+  # profile is updated. Detail-panel raw defaults are spelled out so an absent
+  # key can never read as zero sharpening. ln, not mv: it fails when a sidecar
+  # already exists, and once LrC owns the sidecar it holds the real edits.
+  local f=$1 camera=$2 profile dir stem tmp
+  local profile_re='^[A-Za-z0-9][A-Za-z0-9 ()._+/-]{0,62}$'
+  [[ -f "$PANEL_CONFIG" ]] || return 0
+  panel_flag profile_sidecar || return 0
+  # Bind the rule's body name before contains(): its argument is evaluated
+  # against the string being searched, where .camera does not exist.
+  profile=$(jq -r --arg cam "$camera" '
+    ($cam | ascii_downcase) as $body
+    | [ (.profile_sidecars? // [])[]? | select(type == "object")
+        | select((.camera | type) == "string" and (.profile | type) == "string")
+        | (.camera | ascii_downcase) as $rule_body
+        | select($body | contains($rule_body))
+        | .profile ][0] // empty' "$PANEL_CONFIG" 2>/dev/null) || return 0
+  [[ -n "$profile" ]] || return 0
+  # Re-validated here, as lens rules are, so a mangled config can never put
+  # markup into the sidecar.
+  if [[ ! "$profile" =~ $profile_re ]]; then
+    log "profile sidecar: rejected profile name for $(log_name "${f##*/}")"
+    return 0
+  fi
+  dir=${f%/*}; stem=${f##*/}; stem=${stem%.*}
+  tmp="$dir/.$stem.xmp.$BASHPID.tmp"
+  if printf '%s\n' \
+      '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="camera-sorter">' \
+      ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' \
+      '  <rdf:Description rdf:about=""' \
+      '    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"' \
+      '   crs:Version="18.4"' \
+      '   crs:ProcessVersion="15.4"' \
+      '   crs:WhiteBalance="As Shot"' \
+      "   crs:CameraProfile=\"$profile\"" \
+      '   crs:Sharpness="40"' \
+      '   crs:SharpenRadius="+1.0"' \
+      '   crs:SharpenDetail="25"' \
+      '   crs:SharpenEdgeMasking="0"' \
+      '   crs:LuminanceSmoothing="0"' \
+      '   crs:ColorNoiseReduction="25"' \
+      '   crs:ColorNoiseReductionDetail="50"' \
+      '   crs:ColorNoiseReductionSmoothness="50"' \
+      '   crs:ToneCurveName2012="Linear"' \
+      '   crs:HasSettings="True"' \
+      '   crs:AlreadyApplied="False"/>' \
+      ' </rdf:RDF>' \
+      '</x:xmpmeta>' > "$tmp" 2>/dev/null \
+    && ln -- "$tmp" "$dir/$stem.xmp" 2>/dev/null; then
+    log "profile sidecar: $(log_name "$stem.xmp") -> $profile"  # profile passed profile_re, needs no escaping
+  fi
+  rm -f -- "$tmp" 2>/dev/null
   return 0
 }
 
@@ -1819,6 +1917,7 @@ process() {
     moved_log=$(log_name "$MOVED_DEST")
     log "ok: $log_base -> $date/$type/$moved_log"
     enqueue_notify "$camera" "$type" "$base"
+    if [[ "$type" == raw ]]; then write_profile_sidecar "$MOVED_DEST" "$camera"; fi
     case "${ext,,}" in
       nef|nrw)
         # MOVED_DEST is the absolute final path (suffix included). Massage
@@ -1828,6 +1927,15 @@ process() {
           massage_nef_lens "$MOVED_DEST" "$moved_log" "$camera"
         fi
         queue_nef_for_render "$MOVED_DEST" "$date/$type" "${MOVED_DEST##*/}"
+        ;;
+      arw)
+        # Techart LM-EA9 frames off the a7CR landed in Lightroom as a Canon EF
+        # 40mm: .arw never reached the massage hook, so no lens rule could ever
+        # fire. Identity rewrite only — nef-watch renders NEFs, so there is
+        # nothing to queue here.
+        if truthy "$NEF_LENS_MASSAGE"; then
+          massage_nef_lens "$MOVED_DEST" "$moved_log" "$camera"
+        fi
         ;;
     esac
   fi
@@ -2075,7 +2183,13 @@ reconcile() {
   prune_stale_ftp_tmp
   prune_stale_dupes
   prune_nef_queue
-  find "$INCOMING" -type f -mmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
+  # ctime, not mtime: SMB drags preserve the camera's capture-time mtime, so
+  # mtime says when the shot was taken, not when the file arrived; ctime is set
+  # by the create/write/rename that landed it. On 2026-08-29 04:23:06 the scan
+  # flagged R0000028-2.JPG..R0000031-2.JPG as stuck past the 60-minute
+  # threshold; they had been dragged in seconds earlier with Aug 28 mtimes,
+  # and all four logged ok: one second later.
+  find "$INCOMING" -type f -cmin +"$STUCK_AGE_MIN" -print0 2>/dev/null | while IFS= read -r -d '' f; do
     log "STUCK >${STUCK_AGE_MIN}min: $(log_name "$f")"
   done
   NEXT_RECONCILE_AT=$((SECONDS + RECONCILE_IDLE))

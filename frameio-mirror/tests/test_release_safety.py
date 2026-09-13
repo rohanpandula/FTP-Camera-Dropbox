@@ -165,7 +165,7 @@ class FrameioReleaseSafetyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.original_cfg = dict(app.CFG)
         self.runtime_paths = tempfile.TemporaryDirectory()
-        runtime_root = Path(self.runtime_paths.name)
+        runtime_root = Path(os.path.realpath(self.runtime_paths.name))
         runtime_incoming = runtime_root / "incoming"
         runtime_staging = runtime_root / "staging"
         runtime_state = runtime_root / "state.json"
@@ -347,7 +347,7 @@ class FrameioReleaseSafetyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_or_hardlinked_state_is_rejected_and_health_is_503(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(os.path.realpath(directory))
             incoming = root / "incoming"
             staging = root / "staging"
             incoming.mkdir()
@@ -382,7 +382,7 @@ class FrameioReleaseSafetyTests(unittest.IsolatedAsyncioTestCase):
 
     def test_state_parent_on_shared_incoming_mount_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(os.path.realpath(directory))
             incoming = root / "incoming"
             state_parent = root / "state"
             incoming.mkdir()

@@ -49,6 +49,23 @@ write_valid_heif() {
   } > "$path"
 }
 
+write_padded_heif() {
+  local path=$1
+  {
+    # Same ftyp (24 B) and meta (12 B) as write_valid_heif, then an mdat with
+    # an EXPLICIT 60,008-byte size (0xea68) instead of the valid fixture's
+    # zero size, which would run the box to EOF and swallow the pad, proving
+    # nothing. Boxes end at 24+12+60,008 = 60,044; three trailing zero bytes
+    # make the file 60,047 B, clearing the validator's 50,000 B floor. This is
+    # the X100VI DSCF8283.HIF shape that was quarantined on 2026-08-28.
+    printf '\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic'
+    printf '\x00\x00\x00\x0cmeta\x00\x00\x00\x00'
+    printf '\x00\x00\xea\x68mdat'
+    dd if=/dev/zero bs=1000 count=60 2>/dev/null
+    printf '\x00\x00\x00'
+  } > "$path"
+}
+
 write_truncated_heif() {
   local path=$1
   {
@@ -847,10 +864,16 @@ write_valid_heif "$TEST_ROOT/data/incoming/valid-camera.heic"
 write_valid_heif "$TEST_ROOT/data/incoming/valid-camera.heif"
 write_truncated_heif "$TEST_ROOT/data/incoming/truncated-camera.heic"
 write_truncated_heif "$TEST_ROOT/data/incoming/truncated-camera.heif"
+# Both extensions: get_type maps heif and hif through different case
+# alternatives onto the same heif type.
+write_padded_heif "$TEST_ROOT/data/incoming/padded-camera.heif"
+write_padded_heif "$TEST_ROOT/data/incoming/padded-camera.hif"
 valid_heic_hash=$(sha256sum "$TEST_ROOT/data/incoming/valid-camera.heic" | cut -d' ' -f1)
 valid_heif_hash=$(sha256sum "$TEST_ROOT/data/incoming/valid-camera.heif" | cut -d' ' -f1)
 truncated_heic_hash=$(sha256sum "$TEST_ROOT/data/incoming/truncated-camera.heic" | cut -d' ' -f1)
 truncated_heif_hash=$(sha256sum "$TEST_ROOT/data/incoming/truncated-camera.heif" | cut -d' ' -f1)
+padded_heif_hash=$(sha256sum "$TEST_ROOT/data/incoming/padded-camera.heif" | cut -d' ' -f1)
+padded_hif_hash=$(sha256sum "$TEST_ROOT/data/incoming/padded-camera.hif" | cut -d' ' -f1)
 touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/"*
 : > "$TEST_ROOT/sorter.log"
 
@@ -868,12 +891,12 @@ TG_CONFIG="$TEST_ROOT/telegram.json" \
   /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
 SORTER_PID=$!
 
-wait_for_count "$TEST_ROOT/data/sorted" 2 30 \
-  || fail "valid HEIC/HEIF fixtures did not sort"
+wait_for_count "$TEST_ROOT/data/sorted" 4 30 \
+  || fail "valid or padded HEIC/HEIF fixtures did not sort"
 wait_for_count "$TEST_ROOT/data/quarantine" 2 30 \
   || fail "truncated HEIC/HEIF fixtures were not quarantined"
-wait_for_lines "$TEST_ROOT/data/.sort-locks/queues/notify-queue.tsv" 2 30 \
-  || fail "valid HEIC/HEIF notification rows were lost"
+wait_for_lines "$TEST_ROOT/data/.sort-locks/queues/notify-queue.tsv" 4 30 \
+  || fail "valid or padded HEIC/HEIF notification rows were lost"
 wait_for_lines "$TEST_ROOT/data/.sort-locks/queues/quarantine-queue.tsv" 2 30 \
   || fail "invalid HEIC/HEIF quarantine rows were lost"
 
@@ -881,6 +904,10 @@ valid_heic_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
   -path '*/heif/valid-camera.heic' -print -quit)
 valid_heif_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
   -path '*/heif/valid-camera.heif' -print -quit)
+padded_heif_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
+  -path '*/heif/padded-camera.heif' -print -quit)
+padded_hif_sorted=$(find "$TEST_ROOT/data/sorted" -type f \
+  -path '*/heif/padded-camera.hif' -print -quit)
 truncated_heic_quar=$(find "$TEST_ROOT/data/quarantine" -type f \
   -name truncated-camera.heic -print -quit)
 truncated_heif_quar=$(find "$TEST_ROOT/data/quarantine" -type f \
@@ -903,6 +930,19 @@ grep -q 'heif box overruns EOF' "$TEST_ROOT/sorter.log" \
   || fail "truncated HEIC/HEIF rejection was not explained"
 
 echo "PASS: HEIC and HEIF used bounded ISO-BMFF validation"
+
+[[ -n "$padded_heif_sorted" && -n "$padded_hif_sorted" ]] \
+  || fail "padded HEIF/HIF did not sort under their heif type"
+[[ $(sha256sum "$padded_heif_sorted" | cut -d' ' -f1) == "$padded_heif_hash" ]] \
+  || fail "padded HEIF payload changed during sorting"
+[[ $(sha256sum "$padded_hif_sorted" | cut -d' ' -f1) == "$padded_hif_hash" ]] \
+  || fail "padded HIF payload changed during sorting"
+# Whole-log assertion is safe: the truncated fixtures trip the different
+# 'heif box overruns EOF' message, and the log was truncated above.
+! grep -q 'validate: heif truncated box header' "$TEST_ROOT/sorter.log" \
+  || fail "padded HEIF tripped the truncated-box-header guard"
+
+echo "PASS: padded HEIF/HIF with trailing alignment bytes sorts"
 
 stop_sorter
 rm -rf "$TEST_ROOT/data"
@@ -2601,3 +2641,194 @@ if grep -q 'inotifywait exited before watcher readiness' "$TEST_ROOT/sorter.log"
 fi
 
 echo "PASS: dead inotify watcher exited for container restart"
+
+stop_sorter
+rm -rf "$TEST_ROOT/data"
+mkdir -p "$TEST_ROOT/data/incoming"
+# The .part suffix is load-bearing: process() skips it, so the file stays in
+# incoming for the stuck scan to see and emits no competing log lines.
+printf 'arrived seconds ago, shot three hours ago\n' \
+  > "$TEST_ROOT/data/incoming/late-drop.part"
+# ctime cannot be set backwards, so old-mtime/fresh-ctime is the only pairing
+# the harness can build — and it is exactly what an SMB drag produces. Before
+# the stuck scan moved to -cmin this case failed, which is the point.
+touch -d "@$(( $(date +%s) - 10800 ))" "$TEST_ROOT/data/incoming/late-drop.part"
+: > "$TEST_ROOT/sorter.log"
+
+PATH="$ROOT/tests/fixtures/fast-metadata:$PATH" \
+INCOMING="$TEST_ROOT/data/incoming" \
+SORTED="$TEST_ROOT/data/sorted" \
+QUARANTINE="$TEST_ROOT/data/quarantine" \
+STABLE_WAIT=1 \
+STABLE_SKIP_AGE=1 \
+SORT_WORKERS=1 \
+RECONCILE_IDLE=1 \
+STUCK_AGE_MIN=60 \
+NOTIFY_INTERVAL=3600 \
+RAW_FULL_VALIDATE=0 \
+TG_CONFIG="$TEST_ROOT/telegram.json" \
+  /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
+SORTER_PID=$!
+
+wait_for_log_count 'reconcile scan' 3 20 \
+  || fail "ctime stuck-scan case did not exercise repeated reconciliation"
+assert_log_absent_for 'STUCK >' 3 \
+  || fail "fresh arrival with an old mtime was reported stuck"
+[[ -f "$TEST_ROOT/data/incoming/late-drop.part" ]] \
+  || fail "the late-drop.part fixture left incoming"
+
+echo "PASS: fresh arrival with an old mtime is not reported stuck"
+
+stop_sorter
+
+rm -rf "$TEST_ROOT/data"
+mkdir -p "$TEST_ROOT/data/incoming" "$TEST_ROOT/data/.panel" "$TEST_ROOT/validator-state"
+: > "$TEST_ROOT/validator-release"
+# The stub body is "TEST CAMERA"; the first rule must never win, the match is
+# a case-insensitive substring like the panel's camera filters.
+cat > "$TEST_ROOT/data/.panel/config.json" <<'JSON'
+{"features": {"profile_sidecar": true},
+ "profile_sidecars": [{"camera": "NOT THIS BODY", "profile": "Wrong Profile"},
+                      {"camera": "test camera", "profile": "Cobalt Standard (S)"}]}
+JSON
+printf 'profiled raw fixture\n' > "$TEST_ROOT/data/incoming/profiled.dng"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/profiled.dng"
+: > "$TEST_ROOT/sorter.log"
+
+PATH="$ROOT/tests/fixtures/concurrent-validator:$PATH" \
+TEST_VALIDATOR_STATE_DIR="$TEST_ROOT/validator-state" \
+TEST_VALIDATOR_RELEASE_FILE="$TEST_ROOT/validator-release" \
+INCOMING="$TEST_ROOT/data/incoming" \
+SORTED="$TEST_ROOT/data/sorted" \
+QUARANTINE="$TEST_ROOT/data/quarantine" \
+PANEL_CONFIG="$TEST_ROOT/data/.panel/config.json" \
+STABLE_WAIT=1 \
+STABLE_SKIP_AGE=1 \
+SORT_WORKERS=1 \
+RECONCILE_IDLE=30 \
+NOTIFY_INTERVAL=3600 \
+RAW_MIN_BYTES_DEFAULT=1 \
+RAW_VALIDATE_TIMEOUT=60 \
+RAW_FULL_VALIDATE=1 \
+TG_CONFIG="$TEST_ROOT/telegram.json" \
+  /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
+SORTER_PID=$!
+
+wait_for_log 'profile sidecar: profiled.xmp -> Cobalt Standard' 60 \
+  || fail "matching body did not get a profile sidecar"
+sidecar="$TEST_ROOT/data/sorted/2026-08-02/raw/profiled.xmp"
+[[ -f "$sidecar" ]] || fail "sidecar did not land beside the sorted RAW"
+grep -Fq 'crs:CameraProfile="Cobalt Standard (S)"' "$sidecar" \
+  || fail "sidecar names the wrong profile"
+grep -Fq 'crs:Sharpness="40"' "$sidecar" \
+  || fail "sidecar lost the raw sharpening default"
+! grep -Fq 'Wrong Profile' "$sidecar" \
+  || fail "a non-matching rule leaked into the sidecar"
+[[ -z $(find "$TEST_ROOT/data/sorted/2026-08-02/raw" -name '.*.tmp') ]] \
+  || fail "sidecar temp file left behind"
+
+# An existing sidecar is Lightroom's and holds real edits: it must survive.
+printf 'operator edits\n' > "$TEST_ROOT/data/sorted/2026-08-02/raw/kept.xmp"
+printf 'kept raw fixture\n' > "$TEST_ROOT/data/incoming/kept.dng"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/kept.dng"
+wait_for_log 'ok: kept.dng -> 2026-08-02/raw/kept.dng' 60 \
+  || fail "second RAW did not sort"
+assert_log_absent_for 'profile sidecar: kept.xmp' 3 \
+  || fail "existing sidecar was reported as written"
+[[ $(cat "$TEST_ROOT/data/sorted/2026-08-02/raw/kept.xmp") == 'operator edits' ]] \
+  || fail "existing sidecar was overwritten"
+
+# Switched off from the panel: the next RAW arrives bare, no restart needed.
+cat > "$TEST_ROOT/data/.panel/config.json" <<'JSON'
+{"features": {"profile_sidecar": false},
+ "profile_sidecars": [{"camera": "test camera", "profile": "Cobalt Standard (S)"}]}
+JSON
+printf 'bare raw fixture\n' > "$TEST_ROOT/data/incoming/bare.dng"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/bare.dng"
+wait_for_log 'ok: bare.dng -> 2026-08-02/raw/bare.dng' 60 \
+  || fail "third RAW did not sort"
+assert_log_absent_for 'profile sidecar: bare.xmp' 3 \
+  || fail "sidecar written while the switch is off"
+[[ ! -e "$TEST_ROOT/data/sorted/2026-08-02/raw/bare.xmp" ]] \
+  || fail "switch off still produced a sidecar"
+
+echo "PASS: profile sidecar names the body's camera profile and never clobbers"
+
+stop_sorter
+
+rm -rf "$TEST_ROOT/data"
+mkdir -p "$TEST_ROOT/data/incoming" "$TEST_ROOT/data/.panel"
+: > "$TEST_ROOT/sorter.log"
+# No stub exiftool on PATH for this case — fast-metadata and
+# concurrent-validator both replace the tag reads that are the thing under
+# test. The rule below is the one already live in the panel config on tower.
+cat > "$TEST_ROOT/data/.panel/config.json" <<'JSON'
+{"features": {"lens_massage": true, "ask_on_unknown": true},
+ "lens_rules": [{"match_lens": ["TECHART LM-EA9 40mm"],
+                 "match_camera": ["ILCE-7CR"],
+                 "lens_model": "Minolta M-Rokkor 40mm f2",
+                 "lens_info": "40 40 2 2"}]}
+JSON
+# Minimal little-endian TIFF: header plus one SHORT ImageWidth entry. exiftool
+# -validate calls it OK and reports FileType ARW, so it clears the container
+# check; the byte floors are lifted below because a real a7CR frame is 40 MB.
+printf 'II*\0\x08\0\0\0\x01\0\x00\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0' \
+  > "$TEST_ROOT/data/incoming/techart.arw"
+exiftool -q -q -overwrite_original -Make=SONY -Model=ILCE-7CR \
+  -LensModel="TECHART LM-EA9" -FocalLength=40 -LensInfo="40 40 2.8 2.8" \
+  -FNumber=2 -DateTimeOriginal="2026:09:12 10:00:00" \
+  "$TEST_ROOT/data/incoming/techart.arw" \
+  || fail "could not tag the adapted-lens fixture"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/techart.arw"
+
+INCOMING="$TEST_ROOT/data/incoming" \
+SORTED="$TEST_ROOT/data/sorted" \
+QUARANTINE="$TEST_ROOT/data/quarantine" \
+PANEL_CONFIG="$TEST_ROOT/data/.panel/config.json" \
+NEF_LENS_MASSAGE=1 \
+STABLE_WAIT=1 \
+STABLE_SKIP_AGE=1 \
+SORT_WORKERS=1 \
+RECONCILE_IDLE=30 \
+NOTIFY_INTERVAL=3600 \
+RAW_MIN_BYTES_DEFAULT=1 \
+RAW_MIN_BYTES_SONY_A7CR=1 \
+RAW_VALIDATE_TIMEOUT=60 \
+RAW_FULL_VALIDATE=0 \
+TG_CONFIG="$TEST_ROOT/telegram.json" \
+  /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
+SORTER_PID=$!
+
+# Sony writes no Composite:Lens, so this only fires if .arw reaches the massage
+# hook AND the LensModel + focal-length signature matches the rule.
+wait_for_log 'lens: techart.arw -> Minolta M-Rokkor 40mm f2' 60 \
+  || fail "adapted Sony lens was not matched by LensModel + focal length"
+[[ $(exiftool -T -LensModel -LensInfo -n \
+      "$TEST_ROOT/data/sorted/2026-09-12/raw/techart.arw") \
+   == $'Minolta M-Rokkor 40mm f2\t40 40 2 2' ]] \
+  || fail "sorted ARW does not carry the rewritten lens identity"
+
+# The LensModel fallback sees native glass too: it must never be rewritten and
+# must never raise a panel question (the ask flow is for dumb adapters only).
+printf 'II*\0\x08\0\0\0\x01\0\x00\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0' \
+  > "$TEST_ROOT/data/incoming/native.arw"
+exiftool -q -q -overwrite_original -Make=SONY -Model=ILCE-7CR \
+  -LensModel="FE 35mm F1.4 GM" -FocalLength=35 -LensInfo="35 35 1.4 1.4" \
+  -FNumber=2 -DateTimeOriginal="2026:09:12 10:00:00" \
+  "$TEST_ROOT/data/incoming/native.arw" \
+  || fail "could not tag the native-lens fixture"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/native.arw"
+
+wait_for_log 'ok: native.arw -> 2026-09-12/raw/native.arw' 60 \
+  || fail "native Sony ARW did not sort"
+assert_log_absent_for 'lens: native.arw' 3 \
+  || fail "native Sony glass was rewritten"
+[[ $(exiftool -T -LensModel -n \
+      "$TEST_ROOT/data/sorted/2026-09-12/raw/native.arw") == 'FE 35mm F1.4 GM' ]] \
+  || fail "native ARW lost its own LensModel"
+[[ -z $(find "$TEST_ROOT/data/.panel/pending" -type f 2>/dev/null) ]] \
+  || fail "native Sony glass queued a panel question"
+
+echo "PASS: Sony adapted lens matched by LensModel + focal length; native glass untouched and never asked"
+
+stop_sorter

@@ -4,6 +4,11 @@
 # Each probe produces a human "likely cause" guess — a decision tree covers
 # the realistic failure modes, no LLM required.
 #
+# Separately, it alerts once per aborted FTP upload (pure-ftpd never
+# publishes one): reads the FTP container's log over the last $ABORT_WINDOW
+# (default 15m) and sends straight to Telegram, independent of the
+# state-change mechanism above, deduplicated by a sha256 fingerprint file.
+#
 # Install (Unraid): copy to /boot/config/scripts/, cron via
 # /boot/config/plugins/dynamix/ftpdropbox.cron, then run `update_cron`.
 
@@ -28,6 +33,12 @@ if [[ ! "$DOCKER_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
   printf 'ftpdropbox-healthcheck: invalid DOCKER_TIMEOUT=%s\n' "$DOCKER_TIMEOUT" >&2
   exit 2
 fi
+# Fifteen minutes is three cron intervals: a skipped run still sees every
+# abort in its window, and the fingerprint file (not the window) is what
+# stops an overlapping run from re-sending the same one (D-02). A bad value
+# must never take the whole healthcheck down, so this resets instead of exits.
+ABORT_WINDOW="${ABORT_WINDOW:-15m}"
+[[ "$ABORT_WINDOW" =~ ^[0-9]{1,4}[smh]$ ]] || ABORT_WINDOW=15m
 
 tg() {
   local text=$1 token chat response
@@ -223,6 +234,68 @@ else
     if ! docker_cmd exec "$ftp_container" sh -c \
       "awk 'NR > 1 { split(\$2, a, \":\"); if (a[2] == \"0015\" && \$4 == \"0A\") found=1 } END { exit !found }' /proc/net/tcp /proc/net/tcp6 2>/dev/null"; then
       add "$ftp_container runs but nothing listens on :21 — config or crashed daemon inside container"
+    fi
+  fi
+
+  # --- Aborted FTP uploads (D-01..D-04). The patched pure-ftpd fork never
+  # publishes an aborted upload, so a dying Wi-Fi link left DSC01931.ARW,
+  # DSC01932.ARW and C0090.MP4 with no file, no sorter log line and no alert.
+  # This is an event, not a persistent state: it never touches $problems or
+  # calls commit_state(), and sends straight through tg, deduped by a
+  # fingerprint file so an overlapping cron window never repeats one. No
+  # GRACE gate here — an abort right after a container restart still
+  # deserves an alert. ---
+  if [ -n "$ftp_container" ] \
+     && [ "$(docker_cmd inspect "$ftp_container" --format '{{.State.Status}}' 2>/dev/null)" = "running" ]; then
+    ftp_log=$(docker_cmd logs --since "$ABORT_WINDOW" "$ftp_container" 2>&1 || true)
+    if [ -n "$ftp_log" ]; then
+      declare -A ftp_notice=()
+      notice_re='^([^[:space:]]+) [^[:space:]]+ pure-ftpd: \(([^)]+)\) \[NOTICE\] (.*) uploaded  \(([0-9]+) bytes, ([0-9.]+)KB/sec\)'
+      abort_re='^([^[:space:]]+) [^[:space:]]+ pure-ftpd: \(([^)]+)\) \[DEBUG\] 451-Transfer aborted'
+      while IFS= read -r line; do
+        if [[ "$line" =~ $notice_re ]]; then
+          path=${BASH_REMATCH[3]}
+          # The session key comes from the client-visible (user@host) field;
+          # restrict it to a safe charset so it can never break the
+          # associative-array subscript (a literal ']' would) — review WR-01.
+          session=${BASH_REMATCH[2]//[^A-Za-z0-9@._:-]/_}
+          ftp_notice[$session]="${BASH_REMATCH[4]}|${BASH_REMATCH[5]}|${path##*/}"
+        elif [[ "$line" =~ $abort_re ]]; then
+          ts=${BASH_REMATCH[1]}
+          session=${BASH_REMATCH[2]//[^A-Za-z0-9@._:-]/_}
+          pair=${ftp_notice[$session]:-}
+          if [ -n "$pair" ]; then
+            unset "ftp_notice[$session]"
+            bytes=${pair%%|*}; rest=${pair#*|}
+            speed=${rest%%|*}; fname=${rest#*|}
+            fname=$(printf '%s' "$fname" | tr -d '\000-\037\177')
+            fname=${fname:0:120}
+            mb=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1000000 }')
+            message="⚠️ FTP upload aborted: ${fname} — ${mb} MB received at ${speed%%.*} KB/s before pure-ftpd gave up (451). The file was not saved. Re-send it from the card."
+          else
+            fname="unknown file"; bytes=""
+            message="⚠️ FTP upload aborted: unknown file — pure-ftpd gave up (451) at ${ts}. The file was not saved. Re-send it from the card."
+          fi
+          fingerprint=$(printf '%s' "${ts}|${fname}|${bytes}" | sha256sum); fingerprint=${fingerprint%% *}
+          seen_file="${STATE%/*}/ftp-aborts.seen"
+          [ -e "$seen_file" ] || [ -L "$seen_file" ] || (umask 077; : > "$seen_file")
+          # Same node checks as every sibling state file (review WR-02): a
+          # symlink, special node, hard link, or foreign owner means an
+          # unsafe fingerprint file — send nothing rather than write through it.
+          seen_meta=$(stat -c '%u:%g:%a:%h' -- "$seen_file" 2>/dev/null || true)
+          if [ -L "$seen_file" ] || [ ! -f "$seen_file" ] || [ "$seen_meta" != "0:0:600:1" ]; then
+            printf 'ftpdropbox-healthcheck: unsafe abort fingerprint file: %s\n' "$seen_file" >&2
+            break
+          fi
+          if ! grep -Fqx "$fingerprint" "$seen_file" 2>/dev/null && tg "$message"; then
+            printf '%s\n' "$fingerprint" >> "$seen_file"
+            if seen_tmp=$(mktemp "${seen_file}.tmp.XXXXXX"); then
+              chmod 0600 -- "$seen_tmp"
+              tail -n 500 "$seen_file" > "$seen_tmp" && mv -f -- "$seen_tmp" "$seen_file" || rm -f -- "$seen_tmp"
+            fi
+          fi
+        fi
+      done <<< "$ftp_log"
     fi
   fi
 
