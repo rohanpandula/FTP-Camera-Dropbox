@@ -1468,7 +1468,7 @@ function editRule(index) {
   const rule = index >= 0 ? config.lens_rules[index] : {};
   const form = $("#rule-form");
   form.innerHTML = `<form class="rule-form" id="lens-rule-form" data-rule-index="${index}">
-    <label class="field-label" for="rule-match">Match Lens values<span class="field-help">Comma-separated exact EXIF Lens strings.</span></label><input type="text" id="rule-match" value="${esc((rule.match_lens || []).join(", "))}" placeholder="50mm f/1.2, 50mm f/1.3" required>
+    <label class="field-label" for="rule-match">Match Lens values<span class="field-help">Comma-separated exact EXIF Lens strings. Bodies that write no Lens tag (Sony) match LensModel + focal length, e.g. TECHART LM-EA9 40mm.</span></label><input type="text" id="rule-match" value="${esc((rule.match_lens || []).join(", "))}" placeholder="50mm f/1.2, 50mm f/1.3" required>
     <label class="field-label" for="rule-regex">Lens ID regular expression<span class="field-help">Optional POSIX ERE. \\d and (?:…) are not supported by the sorter.</span></label><input type="text" id="rule-regex" value="${esc(rule.match_lens_id_regex || "")}" placeholder="Leica.*35">
     <span class="field-label">Only these cameras<span class="field-help">Blank matches every body.</span></span><div class="picker" id="rule-include"></div>
     <span class="field-label">Never these cameras</span><div class="picker" id="rule-exclude"></div>
