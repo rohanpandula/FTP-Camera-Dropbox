@@ -55,7 +55,7 @@ Output: `sort.sh` (two small edits), one new harness case, one line of panel hel
 Branch: stay on `feat/panel-density`. Do NOT deploy, do NOT touch tower/the NAS, do NOT ssh anywhere.
 Ponytail: shortest diff that fixes the root cause, no new abstractions, comments explain the observed failure (why), not the what.
 Commit trailer for both commits:
-`Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
+`Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`
 </execution_context>
 
 <context>

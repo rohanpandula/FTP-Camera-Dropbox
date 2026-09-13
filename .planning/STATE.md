@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-01)
 Phase: 4 of 4 (Deploy and Verify) — COMPLETE
 Plan: 2 of 2 in current phase
 Status: Milestone complete; deployed to tower 2026-09-02; PR pending on origin/gsd/2026-09-hardening
-Last activity: 2026-09-02 — 04-02 rollout verified 5/5; frameio-mirror rebuild deferred (DEPLOY.md § 10)
+Last activity: 2026-09-13 - Completed quick task 260912-ugm: Sony a7CR Techart lens rule: match adapted lenses by LensModel + focal length
 
 Progress: [██████████] 100%
 
@@ -76,6 +76,12 @@ None yet.
 
 - No local Docker VM on this Mac (colima has no instance); Linux-only harnesses run on tower through `tests/run-on-tower.sh` (built in Phase 1)
 - The stale panel draft in the working tree must be stashed before the milestone branch is created (Phase 1 setup, done by the orchestrator)
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260912-ugm | Sony a7CR Techart lens rule: match adapted lenses by LensModel + focal length | 2026-09-13 | 6c5a146 | [260912-ugm-sony-a7cr-techart-lens-rule-match-adapte](./quick/260912-ugm-sony-a7cr-techart-lens-rule-match-adapte/) |
 
 ## Deferred Items
 
