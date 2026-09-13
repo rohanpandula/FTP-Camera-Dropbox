@@ -1097,6 +1097,10 @@ massage_nef_lens() {
   # LensMake). Runs post-move on the sorted copy — a failed write leaves a
   # valid, unmassaged file.
   #
+  # The name is historical: this also runs for .arw now (adapted glass on the
+  # a7CR). ponytail: rename this and NEF_LENS_MASSAGE when a third body joins —
+  # today a rename is a large diff for zero behavior change.
+  #
   # Rules come from the panel config when present (matched on the Lens
   # signature, first hit wins); the built-in case below is the fallback when
   # no config exists, so the pipeline works identically without the panel.
@@ -1104,11 +1108,28 @@ massage_nef_lens() {
   # case-insensitive substring of the body name), exclude_camera carves out
   # of that set; both may combine. Camera comes from the caller's already-
   # sanitized get_camera value — no extra EXIF read.
-  local f=$1 base=$2 camera=${3:-} lens lensid rule idre
+  local f=$1 base=$2 camera=${3:-} lens lensid rule idre sig focal ask=1
   panel_flag lens_massage || return 0
   lens=$(exiftool_read -Lens -s3 "$f") || lens=""
   lens=${lens%%$'\n'*}
-  [[ -n "$lens" ]] || return 0
+  if [[ -z "$lens" ]]; then
+    # Sony bodies carry no Composite:Lens at all — exiftool only derives that
+    # tag from Nikon maker notes — so every a7CR frame used to return here. The
+    # LM-EA9 reports a fixed LensModel ("TECHART LM-EA9"), LensInfo and LensID
+    # whatever glass is mounted; FocalLength is the only tag that separates the
+    # M lenses, so the signature the panel rule matches is "<model> <focal>mm".
+    # Keep the read above exactly as it is: adding -n to it would print the
+    # Nikon signature as "40 40 2 2" and break every existing rule.
+    sig=$(exiftool_read -T -LensModel -FocalLength -n "$f") || sig=""
+    sig=${sig%%$'\n'*}
+    IFS=$'\t' read -r lens focal <<<"$sig"
+    # -T prints "-" for a tag the file does not have.
+    [[ -n "$lens" && "$lens" != "-" ]] || return 0
+    if [[ -n "$focal" && "$focal" != "-" ]]; then
+      lens="$lens ${focal}mm"
+    fi
+    ask=0
+  fi
 
   if [[ -f "$PANEL_CONFIG" ]]; then
     rule=$(jq -c --arg lens "$lens" --arg cam "$camera" '
@@ -1143,7 +1164,13 @@ massage_nef_lens() {
     # so deleting a rule in the panel really turns that rewrite off. Unknown
     # non-native glass gets queued for an interactive decision instead.
     if jq -e '.lens_rules | type == "array"' "$PANEL_CONFIG" >/dev/null 2>&1; then
-      queue_lens_question "$f" "$base" "$lens" "$camera"
+      # Only the Composite:Lens signature asks. The LensModel fallback sees
+      # every native Sony lens too, and native glass must never raise a panel
+      # question — the ask flow exists for the dumb adapters that report
+      # nothing usable.
+      if (( ask )); then
+        queue_lens_question "$f" "$base" "$lens" "$camera"
+      fi
       return 0
     fi
   fi
@@ -1900,6 +1927,15 @@ process() {
           massage_nef_lens "$MOVED_DEST" "$moved_log" "$camera"
         fi
         queue_nef_for_render "$MOVED_DEST" "$date/$type" "${MOVED_DEST##*/}"
+        ;;
+      arw)
+        # Techart LM-EA9 frames off the a7CR landed in Lightroom as a Canon EF
+        # 40mm: .arw never reached the massage hook, so no lens rule could ever
+        # fire. Identity rewrite only — nef-watch renders NEFs, so there is
+        # nothing to queue here.
+        if truthy "$NEF_LENS_MASSAGE"; then
+          massage_nef_lens "$MOVED_DEST" "$moved_log" "$camera"
+        fi
         ;;
     esac
   fi

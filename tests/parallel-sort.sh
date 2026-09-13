@@ -2755,3 +2755,80 @@ assert_log_absent_for 'profile sidecar: bare.xmp' 3 \
 echo "PASS: profile sidecar names the body's camera profile and never clobbers"
 
 stop_sorter
+
+rm -rf "$TEST_ROOT/data"
+mkdir -p "$TEST_ROOT/data/incoming" "$TEST_ROOT/data/.panel"
+: > "$TEST_ROOT/sorter.log"
+# No stub exiftool on PATH for this case — fast-metadata and
+# concurrent-validator both replace the tag reads that are the thing under
+# test. The rule below is the one already live in the panel config on tower.
+cat > "$TEST_ROOT/data/.panel/config.json" <<'JSON'
+{"features": {"lens_massage": true, "ask_on_unknown": true},
+ "lens_rules": [{"match_lens": ["TECHART LM-EA9 40mm"],
+                 "match_camera": ["ILCE-7CR"],
+                 "lens_model": "Minolta M-Rokkor 40mm f2",
+                 "lens_info": "40 40 2 2"}]}
+JSON
+# Minimal little-endian TIFF: header plus one SHORT ImageWidth entry. exiftool
+# -validate calls it OK and reports FileType ARW, so it clears the container
+# check; the byte floors are lifted below because a real a7CR frame is 40 MB.
+printf 'II*\0\x08\0\0\0\x01\0\x00\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0' \
+  > "$TEST_ROOT/data/incoming/techart.arw"
+exiftool -q -q -overwrite_original -Make=SONY -Model=ILCE-7CR \
+  -LensModel="TECHART LM-EA9" -FocalLength=40 -LensInfo="40 40 2.8 2.8" \
+  -FNumber=2 -DateTimeOriginal="2026:09:12 10:00:00" \
+  "$TEST_ROOT/data/incoming/techart.arw" \
+  || fail "could not tag the adapted-lens fixture"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/techart.arw"
+
+INCOMING="$TEST_ROOT/data/incoming" \
+SORTED="$TEST_ROOT/data/sorted" \
+QUARANTINE="$TEST_ROOT/data/quarantine" \
+PANEL_CONFIG="$TEST_ROOT/data/.panel/config.json" \
+NEF_LENS_MASSAGE=1 \
+STABLE_WAIT=1 \
+STABLE_SKIP_AGE=1 \
+SORT_WORKERS=1 \
+RECONCILE_IDLE=30 \
+NOTIFY_INTERVAL=3600 \
+RAW_MIN_BYTES_DEFAULT=1 \
+RAW_MIN_BYTES_SONY_A7CR=1 \
+RAW_VALIDATE_TIMEOUT=60 \
+RAW_FULL_VALIDATE=0 \
+TG_CONFIG="$TEST_ROOT/telegram.json" \
+  /bin/bash "$SORTER" > "$TEST_ROOT/sorter.log" 2>&1 &
+SORTER_PID=$!
+
+# Sony writes no Composite:Lens, so this only fires if .arw reaches the massage
+# hook AND the LensModel + focal-length signature matches the rule.
+wait_for_log 'lens: techart.arw -> Minolta M-Rokkor 40mm f2' 60 \
+  || fail "adapted Sony lens was not matched by LensModel + focal length"
+[[ $(exiftool -T -LensModel -LensInfo -n \
+      "$TEST_ROOT/data/sorted/2026-09-12/raw/techart.arw") \
+   == $'Minolta M-Rokkor 40mm f2\t40 40 2 2' ]] \
+  || fail "sorted ARW does not carry the rewritten lens identity"
+
+# The LensModel fallback sees native glass too: it must never be rewritten and
+# must never raise a panel question (the ask flow is for dumb adapters only).
+printf 'II*\0\x08\0\0\0\x01\0\x00\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0' \
+  > "$TEST_ROOT/data/incoming/native.arw"
+exiftool -q -q -overwrite_original -Make=SONY -Model=ILCE-7CR \
+  -LensModel="FE 35mm F1.4 GM" -FocalLength=35 -LensInfo="35 35 1.4 1.4" \
+  -FNumber=2 -DateTimeOriginal="2026:09:12 10:00:00" \
+  "$TEST_ROOT/data/incoming/native.arw" \
+  || fail "could not tag the native-lens fixture"
+touch -d '2 minutes ago' "$TEST_ROOT/data/incoming/native.arw"
+
+wait_for_log 'ok: native.arw -> 2026-09-12/raw/native.arw' 60 \
+  || fail "native Sony ARW did not sort"
+assert_log_absent_for 'lens: native.arw' 3 \
+  || fail "native Sony glass was rewritten"
+[[ $(exiftool -T -LensModel -n \
+      "$TEST_ROOT/data/sorted/2026-09-12/raw/native.arw") == 'FE 35mm F1.4 GM' ]] \
+  || fail "native ARW lost its own LensModel"
+[[ -z $(find "$TEST_ROOT/data/.panel/pending" -type f 2>/dev/null) ]] \
+  || fail "native Sony glass queued a panel question"
+
+echo "PASS: Sony adapted lens matched by LensModel + focal length; native glass untouched and never asked"
+
+stop_sorter
