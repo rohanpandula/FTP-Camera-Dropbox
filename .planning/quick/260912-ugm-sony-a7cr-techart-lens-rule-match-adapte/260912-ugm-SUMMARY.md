@@ -167,3 +167,7 @@ The executor wrote an Opus 5 trailer; the orchestrator rebased both commits onto
 - `c6e50c0` — FOUND in `git log`
 - No file deletions in either commit (`git diff --diff-filter=D HEAD~1 HEAD` empty for both)
 - Working tree clean apart from this SUMMARY
+
+## Post-merge harness run
+
+2026-09-13: `tests/run-on-tower.sh parallel-sort` run by the operator from a terminal on the merged branch (image sha256 69487007…): all 52 cases printed PASS, including `PASS: Sony adapted lens matched by LensModel + focal length; native glass untouched and never asked`. Deploy per DEPLOY.md § 2 is still pending.
